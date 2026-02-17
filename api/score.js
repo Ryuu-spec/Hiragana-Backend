@@ -3,7 +3,7 @@ let currentKeyIndex = 0;
 
 // Vercel Serverless Function
 export default async function handler(req, res) {
-  // CORS 설정 (다른 도메인에서 호출 가능하도록)
+  // CORS 설정
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -18,20 +18,16 @@ export default async function handler(req, res) {
 
   try {
     const { target, imageData } = req.body;
-    
     if (!target || !imageData) {
       return res.status(400).json({ error: '필수 데이터가 없습니다.' });
     }
 
-    // 환경 변수에서 API 키들 가져오기
     const apiKeysString = process.env.GEMINI_API_KEYS;
     if (!apiKeysString) {
       throw new Error('GEMINI_API_KEYS 환경 변수가 설정되지 않았습니다.');
     }
 
     const apiKeys = apiKeysString.split(',').map(key => key.trim());
-    
-    // 모델 및 프롬프트 설정
     const modelName = "gemini-1.5-flash"; 
     const systemPrompt = `Evaluate Hiragana '${target}'. Check strokes, balance. Score(0-100) and short Korean feedback. JSON:{"score":number,"feedback":string}`;
 
@@ -42,9 +38,7 @@ export default async function handler(req, res) {
         const apiKey = apiKeys[currentKeyIndex];
         currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
         
-        console.log(`API 키 ${attempt + 1}/${apiKeys.length} 시도 중...`);
-
-        // ✅ 핵심 수정: v1beta 대신 v1 경로 사용
+        // ✅ 핵심 수정: v1beta를 v1으로 변경하여 모델 인식 문제 해결
         const response = await fetch(
           `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${apiKey}`,
           {
@@ -67,9 +61,7 @@ export default async function handler(req, res) {
         
         if (!response.ok) {
           const errorData = await response.json();
-          if (response.status === 429) {
-            continue; // 다음 키로 시도
-          }
+          if (response.status === 429) continue;
           throw new Error(`Gemini API 오류: ${errorData.error?.message || 'Unknown error'}`);
         }
         
@@ -86,11 +78,10 @@ export default async function handler(req, res) {
         }
       }
     }
-    
   } catch (error) {
     console.error('Error:', error);
     return res.status(500).json({ 
-      error: '서버 오류 발생',
+      error: '서버 오류가 발생했습니다.',
       details: error.message 
     });
   }
