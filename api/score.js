@@ -4,7 +4,7 @@ export const config = {
   },
 };
 
-// v2
+// v3
 let currentKeyIndex = 0;
 
 export default async function handler(req, res) {
@@ -30,7 +30,7 @@ export default async function handler(req, res) {
     currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
