@@ -29,7 +29,7 @@ export default async function handler(req, res) {
     currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -43,6 +43,7 @@ export default async function handler(req, res) {
     );
 
     const data = await response.json();
+
     if (!response.ok) throw new Error(data.error?.message || 'API Error');
 
     let resultText = data.candidates[0].content.parts[0].text;
