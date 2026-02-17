@@ -1,8 +1,6 @@
 export const config = {
   api: {
-    bodyParser: {
-      sizeLimit: '10mb', // 이미지 업로드를 위해 용량 제한을 늘리는 것이 좋습니다
-    },
+    bodyParser: { sizeLimit: '10mb' },
   },
 };
 
@@ -24,8 +22,12 @@ export default async function handler(req, res) {
     const apiKey = apiKeys[currentKeyIndex];
     currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
 
-    // 💡 핵심 수정: 모델명을 변수로 분리하고 URL 형식을 가장 표준적인 v1beta로 고정
-    const model = "gemini-1.5-flash";
+    /**
+     * 💡 핵심 수정: 
+     * 이미지 목록에서 확인된 사용 가능한 모델인 'gemini-2.0-flash'를 사용합니다.
+     * (만약 더 최신을 원하시면 'gemini-2.5-flash'도 가능합니다)
+     */
+    const model = "gemini-2.0-flash"; 
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const response = await fetch(apiUrl, {
@@ -38,13 +40,11 @@ export default async function handler(req, res) {
             { 
               inlineData: { 
                 mimeType: "image/jpeg", 
-                // 접두어 제거 로직
                 data: imageData.includes(',') ? imageData.split(',')[1] : imageData 
               } 
             }
           ] 
         }],
-        // v1beta에서 JSON 응답을 강제하는 가장 정확한 설정
         generationConfig: {
           responseMimeType: "application/json",
         }
@@ -54,19 +54,14 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     if (!response.ok) {
-      console.error('Gemini API 상세 에러:', data);
-      // 만약 1.5-flash를 못 찾는다면 1.5-pro로 자동 폴백(Fallback) 시도 로직을 넣을 수도 있습니다.
+      console.error('Gemini API Error:', data);
       throw new Error(data.error?.message || 'API Error');
     }
 
-    // 결과값 추출
     const resultText = data.candidates[0].content.parts[0].text;
-    
-    // JSON 응답이 확실하므로 바로 파싱
     return res.status(200).json(JSON.parse(resultText));
 
   } catch (error) {
-    console.error('서버 에러 발생:', error.message);
-    return res.status(500).json({ error: '서버 에러', details: error.message });
+    return res.status(500).json({ error: 'Server Error', details: error.message });
   }
 }
