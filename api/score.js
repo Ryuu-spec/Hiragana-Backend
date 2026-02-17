@@ -1,7 +1,6 @@
 // 키 순환을 위한 전역 변수
 let currentKeyIndex = 0;
 
-// Vercel Serverless Function
 export default async function handler(req, res) {
   // CORS 설정
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -38,7 +37,7 @@ export default async function handler(req, res) {
         const apiKey = apiKeys[currentKeyIndex];
         currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
         
-        // ✅ 핵심 수정: v1beta를 v1으로 변경하여 모델 인식 문제 해결
+        // ✅ v1 정식 버전 주소로 수정 완료
         const response = await fetch(
           `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${apiKey}`,
           {
@@ -61,7 +60,8 @@ export default async function handler(req, res) {
         
         if (!response.ok) {
           const errorData = await response.json();
-          if (response.status === 429) continue;
+          console.error(`키 ${currentKeyIndex} 실패:`, errorData.error?.message);
+          if (response.status === 429) continue; // 할당량 초과 시 다음 키로
           throw new Error(`Gemini API 오류: ${errorData.error?.message || 'Unknown error'}`);
         }
         
