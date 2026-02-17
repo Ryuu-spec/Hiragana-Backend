@@ -1,10 +1,11 @@
 export const config = {
   api: {
-    bodyParser: true,
+    bodyParser: {
+      sizeLimit: '10mb', // 이미지 업로드를 위해 용량 제한을 늘리는 것이 좋습니다
+    },
   },
 };
 
-// API 키 인덱스 관리 (서버가 켜져 있는 동안 유지)
 let currentKeyIndex = 0;
 
 export default async function handler(req, res) {
@@ -16,26 +17,16 @@ export default async function handler(req, res) {
 
   try {
     const { target, imageData } = req.body;
+    const apiKeys = (process.env.GEMINI_API_KEYS || '').split(',').map(k => k.trim()).filter(k => k);
 
-    const apiKeys = (process.env.GEMINI_API_KEYS || '')
-      .split(',')
-      .map(k => k.trim())
-      .filter(k => k);
+    if (apiKeys.length === 0) return res.status(500).json({ error: 'API 키가 설정되지 않았습니다.' });
 
-    if (apiKeys.length === 0) {
-      return res.status(500).json({ error: 'API 키가 설정되지 않았습니다.' });
-    }
-
-    // 키 로테이션
     const apiKey = apiKeys[currentKeyIndex];
     currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
 
-    /**
-     * 🛠️ 핵심 수정 사항: 
-     * 1. v1 -> v1beta (1.5 모델 지원을 위해 필수)
-     * 2. gemini-1.5-flash -> gemini-1.5-flash-latest (인식 에러 해결을 위해 모델명 명시)
-     */
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+    // 💡 핵심 수정: 모델명을 변수로 분리하고 URL 형식을 가장 표준적인 v1beta로 고정
+    const model = "gemini-1.5-flash";
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const response = await fetch(apiUrl, {
       method: 'POST',
@@ -43,56 +34,39 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         contents: [{ 
           parts: [
-            { text: `Evaluate Hiragana '${target}'. Give a score(0-100) and short Korean feedback. Please respond ONLY with a valid JSON object: {"score":number, "feedback":"string"}` },
+            { text: `Evaluate the handwritten Hiragana '${target}'. Give a score(0-100) and short Korean feedback. Respond ONLY in JSON format: {"score":number, "feedback":"string"}` },
             { 
               inlineData: { 
                 mimeType: "image/jpeg", 
-                // base64 데이터 정제: 'data:image/jpeg;base64,' 등의 접두어가 있다면 제거
+                // 접두어 제거 로직
                 data: imageData.includes(',') ? imageData.split(',')[1] : imageData 
               } 
             }
           ] 
         }],
+        // v1beta에서 JSON 응답을 강제하는 가장 정확한 설정
         generationConfig: {
-          // 응답 형식을 JSON으로 강제 (v1beta의 강력한 기능)
-          responseMimeType: "application/json"
+          responseMimeType: "application/json",
         }
       })
     });
 
     const data = await response.json();
 
-    // API 응답 에러 핸들링
     if (!response.ok) {
-      console.error('Gemini API Error Detail:', JSON.stringify(data, null, 2));
-      throw new Error(data.error?.message || 'API 호출 중 오류가 발생했습니다.');
+      console.error('Gemini API 상세 에러:', data);
+      // 만약 1.5-flash를 못 찾는다면 1.5-pro로 자동 폴백(Fallback) 시도 로직을 넣을 수도 있습니다.
+      throw new Error(data.error?.message || 'API Error');
     }
 
-    // 결과 추출
-    if (!data.candidates || data.candidates.length === 0) {
-      throw new Error('모델로부터 응답을 받지 못했습니다.');
-    }
-
+    // 결과값 추출
     const resultText = data.candidates[0].content.parts[0].text;
     
-    // JSON 안전하게 파싱 및 반환
-    try {
-      const parsedResult = JSON.parse(resultText);
-      return res.status(200).json(parsedResult);
-    } catch (parseError) {
-      // 혹시 모델이 마크다운 형식을 섞었을 경우를 대비한 정규식 추출
-      const jsonMatch = resultText.match(/\{.*\}/s);
-      if (jsonMatch) {
-        return res.status(200).json(JSON.parse(jsonMatch[0]));
-      }
-      throw new Error('응답 데이터를 해석할 수 없습니다.');
-    }
+    // JSON 응답이 확실하므로 바로 파싱
+    return res.status(200).json(JSON.parse(resultText));
 
   } catch (error) {
-    console.error('Server Handler Error:', error.message);
-    return res.status(500).json({ 
-      error: '서버 에러가 발생했습니다.', 
-      details: error.message 
-    });
+    console.error('서버 에러 발생:', error.message);
+    return res.status(500).json({ error: '서버 에러', details: error.message });
   }
 }
