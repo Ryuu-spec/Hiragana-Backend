@@ -4,6 +4,7 @@ export const config = {
   },
 };
 
+// v2
 let currentKeyIndex = 0;
 
 export default async function handler(req, res) {
