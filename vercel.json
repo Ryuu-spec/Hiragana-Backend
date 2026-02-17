@@ -1,6 +1,17 @@
 {
   "cleanUrls": true,
+  "trailingSlash": false,
   "rewrites": [
-    { "source": "/", "destination": "/hiragana_a.html" }
+    { "source": "/", "destination": "/hiragana_a.html" },
+    { "source": "/hiragana_a", "destination": "/hiragana_a.html" },
+    { "source": "/hiragana_ka", "destination": "/hiragana_ka.html" },
+    { "source": "/hiragana_sa", "destination": "/hiragana_sa.html" },
+    { "source": "/hiragana_ta", "destination": "/hiragana_ta.html" },
+    { "source": "/hiragana_na", "destination": "/hiragana_na.html" },
+    { "source": "/hiragana_ha", "destination": "/hiragana_ha.html" },
+    { "source": "/hiragana_ma", "destination": "/hiragana_ma.html" },
+    { "source": "/hiragana_ya", "destination": "/hiragana_ya.html" },
+    { "source": "/hiragana_ra", "destination": "/hiragana_ra.html" },
+    { "source": "/hiragana_wa", "destination": "/hiragana_wa.html" }
   ]
 }
