@@ -22,8 +22,8 @@ export default async function handler(req, res) {
     const apiKey = apiKeys[currentKeyIndex];
     currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
 
-    // 💡 이미지 목록에서 확인된 최신 모델명을 정확히 사용합니다.
-    const model = "gemini-2.0-flash"; 
+    // 💡 2.0-flash가 limit: 0 이므로, 가장 범용적인 1.5-flash를 사용합니다.
+    const model = "gemini-1.5-flash"; 
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const response = await fetch(apiUrl, {
@@ -48,11 +48,11 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     if (!response.ok) {
-      // 💡 여기서 에러가 난다면 100% 키의 할당량 문제입니다.
+      // 에러가 발생하면 모델명과 함께 리턴하여 디버깅을 돕습니다.
       return res.status(response.status).json({ 
         error: 'API 에러', 
         details: data.error?.message,
-        model_used: model 
+        tried_model: model 
       });
     }
 
