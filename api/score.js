@@ -32,7 +32,7 @@ export default async function handler(req, res) {
 
     const apiKeys = apiKeysString.split(',').map(key => key.trim());
     
-    // ✅ 모델명을 실존하는 명칭으로 수정했습니다.
+    // 모델명 설정
     const modelName = "gemini-1.5-flash"; 
     const systemPrompt = `Evaluate Hiragana '${target}'. Check strokes, balance. Score(0-100) and short Korean feedback. JSON:{"score":number,"feedback":string}`;
 
@@ -47,8 +47,9 @@ export default async function handler(req, res) {
         
         console.log(`API 키 ${attempt + 1}/${apiKeys.length} 사용 중...`);
 
+        // ✅ 주소를 v1beta에서 v1으로 수정했습니다.
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
+          `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${apiKey}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
