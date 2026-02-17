@@ -1,0 +1,10 @@
+{
+  "name": "hiragana-ai-backend",
+  "version": "1.0.0",
+  "description": "Backend server for Hiragana AI Trainer",
+  "main": "api/score.js",
+  "type": "module",
+  "dependencies": {
+    "node-fetch": "^3.3.0"
+  }
+}
