@@ -22,11 +22,7 @@ export default async function handler(req, res) {
     const apiKey = apiKeys[currentKeyIndex];
     currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
 
-    /**
-     * 💡 핵심 수정: 
-     * 이미지 1에서 확인된 사용 가능한 모델명 중 가장 가벼운 'gemini-2.0-flash'를 사용합니다.
-     * (만약 1.5-flash가 목록에 없다면 2.0-flash가 현재 가장 최선의 선택입니다.)
-     */
+    // 💡 이미지 목록에서 확인된 사용 가능한 최신 모델로 변경
     const model = "gemini-2.0-flash"; 
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
@@ -45,23 +41,16 @@ export default async function handler(req, res) {
             }
           ] 
         }],
-        generationConfig: {
-          responseMimeType: "application/json",
-        }
+        generationConfig: { responseMimeType: "application/json" }
       })
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      console.error('Gemini API Error:', data);
-      
-      // 할당량(Quota) 문제일 경우의 메시지 처리
-      if (data.error?.message.includes("quota") || data.error?.message.includes("limit")) {
-        return res.status(429).json({ 
-          error: '할당량 부족 (Limit 0)', 
-          details: '현재 무료 등급 키에서 이 모델에 대한 사용량이 제한되었습니다. AI Studio에서 1.5-flash 모델이 포함된 다른 프로젝트의 키를 생성해 보세요.' 
-        });
+      // 할당량(Quota) 초과 시 재시도 안내 로직
+      if (data.error?.message.includes("quota")) {
+        return res.status(429).json({ error: '할당량 부족', details: '무료 등급 키의 사용량이 일시적으로 소진되었습니다.' });
       }
       throw new Error(data.error?.message || 'API Error');
     }
