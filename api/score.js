@@ -10,17 +10,13 @@ export default async function handler(req, res) {
 
   try {
     const { target, imageData } = req.body;
-    // Vercel 환경변수에 넣으신 새 구글 키 (하나만 넣어도 작동합니다)
+    // 환경변수에서 첫 번째 키를 가져옵니다.
     const apiKey = (process.env.GEMINI_API_KEYS || '').split(',')[0].trim();
 
-    if (!apiKey) return res.status(500).json({ error: 'API 키가 없습니다.' });
+    if (!apiKey) return res.status(500).json({ error: 'API 키가 설정되지 않았습니다.' });
 
-    /**
-     * 💡 모델명 핵심 수정: 
-     * 'gemini-1.5-flash'가 안 된다면 'gemini-1.5-flash-latest'가 정답입니다.
-     * 주소 또한 v1beta 대신 v1을 사용하여 안정성을 높였습니다.
-     */
-    const model = "gemini-1.5-flash-latest"; 
+    // 💡 가장 범용적인 모델명과 안정적인 v1 API 주소 사용
+    const model = "gemini-1.5-flash"; 
     const apiUrl = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${apiKey}`;
 
     const response = await fetch(apiUrl, {
@@ -38,27 +34,26 @@ export default async function handler(req, res) {
             }
           ] 
         }],
-        generationConfig: { responseMimeType: "application/json" }
+        generationConfig: { 
+          responseMimeType: "application/json" 
+        }
       })
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      // 할당량 부족(limit: 0) 에러 발생 시의 상세 안내
-      if (data.error?.message.includes("quota") || data.error?.message.includes("limit")) {
-        return res.status(429).json({ 
-          error: '구글 할당량 제한', 
-          details: '현재 계정의 무료 사용량이 일시적으로 0으로 설정되었습니다. 다른 구글 계정의 키를 사용하거나 잠시 기다려야 합니다.' 
-        });
-      }
-      throw new Error(data.error?.message || 'API Error');
+      // ⚠️ 여기서 'Quota exceeded'나 'limit: 0'이 뜬다면 계정 자체의 문제입니다.
+      return res.status(response.status).json({ 
+        error: '구글 API 제한', 
+        details: data.error?.message 
+      });
     }
 
     const resultText = data.candidates[0].content.parts[0].text;
     return res.status(200).json(JSON.parse(resultText));
 
   } catch (error) {
-    return res.status(500).json({ error: 'Server Error', details: error.message });
+    return res.status(500).json({ error: '서버 에러', details: error.message });
   }
 }
