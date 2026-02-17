@@ -1,3 +1,9 @@
+export const config = {
+  api: {
+    bodyParser: true,
+  },
+};
+
 let currentKeyIndex = 0;
 
 export default async function handler(req, res) {
@@ -10,7 +16,6 @@ export default async function handler(req, res) {
   try {
     const { target, imageData } = req.body;
 
-    // ✅ 수정 1: 키가 없을 때 안전하게 처리
     const apiKeys = (process.env.GEMINI_API_KEYS || '')
       .split(',')
       .map(k => k.trim())
@@ -23,7 +28,6 @@ export default async function handler(req, res) {
     const apiKey = apiKeys[currentKeyIndex];
     currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
 
-    // ✅ 수정 2: v1beta로 변경
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
