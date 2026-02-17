@@ -30,8 +30,12 @@ export default async function handler(req, res) {
     const apiKey = apiKeys[currentKeyIndex];
     currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
 
-    // 핵심 수정 부분: v1 -> v1beta 로 변경
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    /**
+     * 🛠️ 핵심 수정 사항: 
+     * 1. v1 -> v1beta (1.5 모델 지원을 위해 필수)
+     * 2. gemini-1.5-flash -> gemini-1.5-flash-latest (인식 에러 해결을 위해 모델명 명시)
+     */
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
 
     const response = await fetch(apiUrl, {
       method: 'POST',
@@ -43,14 +47,14 @@ export default async function handler(req, res) {
             { 
               inlineData: { 
                 mimeType: "image/jpeg", 
-                // base64 데이터에 접두어(data:image/jpeg;base64,)가 붙어있는 경우 제거 로직 추가
+                // base64 데이터 정제: 'data:image/jpeg;base64,' 등의 접두어가 있다면 제거
                 data: imageData.includes(',') ? imageData.split(',')[1] : imageData 
               } 
             }
           ] 
         }],
-        // 응답 형식을 JSON으로 강제하여 파싱 에러 방지 (v1beta 기능)
         generationConfig: {
+          // 응답 형식을 JSON으로 강제 (v1beta의 강력한 기능)
           responseMimeType: "application/json"
         }
       })
@@ -58,30 +62,37 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    // API 응답 에러 핸들링 강화
+    // API 응답 에러 핸들링
     if (!response.ok) {
-      console.error('Gemini API Error:', data);
-      throw new Error(data.error?.message || 'API Error');
+      console.error('Gemini API Error Detail:', JSON.stringify(data, null, 2));
+      throw new Error(data.error?.message || 'API 호출 중 오류가 발생했습니다.');
     }
 
-    // 결과 추출 및 파싱
-    let resultText = data.candidates[0].content.parts[0].text;
+    // 결과 추출
+    if (!data.candidates || data.candidates.length === 0) {
+      throw new Error('모델로부터 응답을 받지 못했습니다.');
+    }
+
+    const resultText = data.candidates[0].content.parts[0].text;
     
-    // JSON 응답을 더 안전하게 파싱
+    // JSON 안전하게 파싱 및 반환
     try {
       const parsedResult = JSON.parse(resultText);
       return res.status(200).json(parsedResult);
     } catch (parseError) {
-      // 정규식으로 JSON만 추출 시도 (만약의 경우 대비)
+      // 혹시 모델이 마크다운 형식을 섞었을 경우를 대비한 정규식 추출
       const jsonMatch = resultText.match(/\{.*\}/s);
       if (jsonMatch) {
         return res.status(200).json(JSON.parse(jsonMatch[0]));
       }
-      throw new Error('JSON 파싱에 실패했습니다.');
+      throw new Error('응답 데이터를 해석할 수 없습니다.');
     }
 
   } catch (error) {
-    console.error('Server Handler Error:', error);
-    return res.status(500).json({ error: 'Server Error', details: error.message });
+    console.error('Server Handler Error:', error.message);
+    return res.status(500).json({ 
+      error: '서버 에러가 발생했습니다.', 
+      details: error.message 
+    });
   }
 }
