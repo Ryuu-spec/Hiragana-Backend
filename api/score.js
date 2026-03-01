@@ -19,7 +19,6 @@ export default async function handler(req, res) {
   const { target, imageData } = req.body;
   const apiKey = process.env.GEMINI_API_KEY;
 
-  // 프론트에서 이미 split(',')[1] 처리된 순수 base64가 옴
   const base64Data = imageData.includes(',') ? imageData.split(',')[1] : imageData;
 
   try {
@@ -31,7 +30,15 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           contents: [{
             parts: [
-              { text: `당신은 냉철한 일본어 서예 감정사입니다. 결과를 반드시 JSON으로만 응답하세요. 이 히라가나 '${target}'를 채점해줘.` },
+              { text: `당신은 일본어 히라가나 쓰기 선생님입니다. 학습자가 쓴 히라가나 '${target}'를 평가해주세요.
+
+점수는 100점 만점으로 채점하되, 일반적인 학습자 수준에서 관대하게 평가해주세요. 획의 기본 형태가 맞으면 70점 이상, 잘 썼으면 85점 이상을 주세요.
+
+반드시 아래 JSON 형식으로만 응답하세요:
+{
+  "score": 숫자(0-100),
+  "feedback": "한국어로 2-3문장 피드백. 잘된 점과 개선할 점을 함께 언급해주세요."
+}` },
               { inline_data: { mime_type: "image/jpeg", data: base64Data } }
             ]
           }]
