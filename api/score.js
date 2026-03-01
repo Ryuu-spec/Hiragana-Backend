@@ -19,6 +19,9 @@ export default async function handler(req, res) {
   const { target, imageData } = req.body;
   const apiKey = process.env.GEMINI_API_KEY;
 
+  // 프론트에서 이미 split(',')[1] 처리된 순수 base64가 옴
+  const base64Data = imageData.includes(',') ? imageData.split(',')[1] : imageData;
+
   try {
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`,
@@ -29,12 +32,9 @@ export default async function handler(req, res) {
           contents: [{
             parts: [
               { text: `당신은 냉철한 일본어 서예 감정사입니다. 결과를 반드시 JSON으로만 응답하세요. 이 히라가나 '${target}'를 채점해줘.` },
-              { inline_data: { mime_type: "image/png", data: imageData.split(',')[1] } }
+              { inline_data: { mime_type: "image/jpeg", data: base64Data } }
             ]
-          }],
-          generationConfig: { 
-            temperature: 0 
-          }
+          }]
         })
       }
     );
