@@ -4,18 +4,15 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*'); 
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
-
   // 브라우저의 사전 점검(OPTIONS) 요청 즉시 통과
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
-
   const { target, imageData } = req.body;
   const apiKey = process.env.GEMINI_API_KEY;
-
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -34,9 +31,7 @@ export default async function handler(req, res) {
         })
       }
     );
-
     const data = await response.json();
-
     // [주의] 제미나이 3.0은 반드시 이 경로로 데이터를 읽어야 함
     if (data.candidates && data.candidates[0]) {
       const resultText = data.candidates[0].content.parts[0].text;
@@ -44,7 +39,6 @@ export default async function handler(req, res) {
     } else {
       return res.status(500).json({ error: "AI 응답 구조 오류", detail: data });
     }
-
   } catch (err) {
     return res.status(500).json({ error: "서버 연결 실패", message: err.message });
   }
