@@ -1,4 +1,12 @@
-module.exports = async function handler(req, res) {
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb',
+    },
+  },
+};
+
+export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*'); 
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -47,7 +55,6 @@ module.exports = async function handler(req, res) {
         return res.status(500).json({ error: "text 없음", detail: candidate });
       }
 
-      // JSON 블록 마크다운 제거 후 파싱
       const cleaned = resultText.replace(/```json|```/g, '').trim();
 
       try {
