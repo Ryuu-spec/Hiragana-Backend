@@ -1,10 +1,13 @@
 export default async function handler(req, res) {
-  // 1. CORS 문제 해결을 위한 헤더 설정
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // 모든 출처(Origin)로부터의 요청을 허용함
+  res.setHeader('Access-Control-Allow-Origin', '*'); 
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  // 브라우저가 보낸 사전 점검(OPTIONS) 요청에 200 OK로 즉시 응답
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
 
   const { target, imageData } = req.body;
   const apiKey = process.env.GEMINI_API_KEY;
@@ -19,7 +22,7 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           contents: [{
             parts: [
-              { text: `이 히라가나 '${target}'를 채점해줘. 결과는 반드시 JSON으로만 응답해.` },
+              { text: `이 히라가나 '${target}'를 채점해줘. JSON 형식으로만 응답해.` },
               { inline_data: { mime_type: "image/png", data: imageData.split(',')[1] } }
             ]
           }],
@@ -33,17 +36,15 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    // [중요] 데이터 존재 여부를 먼저 확인하여 TypeError 방지
+    // 데이터 구조가 안전한지 확인 (TypeError 방지)
     if (!data.candidates || data.candidates.length === 0) {
-      console.error("AI 응답 생성 실패:", JSON.stringify(data));
-      return res.status(500).json({ error: "AI가 응답을 생성하지 못했습니다.", detail: data });
+      return res.status(500).json({ error: "AI 응답 생성 실패", detail: data });
     }
 
     const resultText = data.candidates[0].content.parts[0].text;
     return res.status(200).json(JSON.parse(resultText));
 
   } catch (err) {
-    console.error("서버 내부 오류:", err.message);
     return res.status(500).json({ error: "서버 에러", message: err.message });
   }
 }
