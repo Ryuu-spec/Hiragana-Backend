@@ -32,12 +32,29 @@ export default async function handler(req, res) {
       }
     );
     const data = await response.json();
-    // [주의] 제미나이 3.0은 반드시 이 경로로 데이터를 읽어야 함
+
     if (data.candidates && data.candidates[0]) {
-      const resultText = data.candidates[0].content.parts[0].text;
-      return res.status(200).json(JSON.parse(resultText));
+      const candidate = data.candidates[0];
+
+      // 안전하게 접근
+      const parts = candidate?.content?.parts;
+      if (!parts || !parts[0]) {
+        return res.status(500).json({ error: "parts 없음", detail: data });
+      }
+
+      const resultText = parts[0].text;
+      if (!resultText) {
+        return res.status(500).json({ error: "text 없음", detail: candidate });
+      }
+
+      try {
+        return res.status(200).json(JSON.parse(resultText));
+      } catch(e) {
+        return res.status(500).json({ error: "JSON 파싱 실패", raw: resultText });
+      }
+
     } else {
-      return res.status(500).json({ error: "AI 응답 구조 오류", detail: data });
+      return res.status(500).json({ error: "candidates 없음", detail: data });
     }
   } catch (err) {
     return res.status(500).json({ error: "서버 연결 실패", message: err.message });
