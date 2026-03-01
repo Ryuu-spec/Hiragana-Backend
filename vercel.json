@@ -1,9 +1,4 @@
 {
-  "functions": {
-    "api/score.js": {
-      "runtime": "nodejs20.x"
-    }
-  },
   "headers": [
     {
       "source": "/api/(.*)",
