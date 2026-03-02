@@ -1,11 +1,11 @@
-import { FEWSHOT_DB, NEG_PATTERNS } from '../fewshot_db';
+const { FEWSHOT_DB, NEG_PATTERNS } = require('../fewshot_db');
 
-export const config = {
+module.exports = {
   api: { bodyParser: { sizeLimit: '10mb' } },
 };
 
 // ============================================================
-// 퓨샷 프롬프트 빌더 — FEWSHOT_DB에서 해당 글자 앵커 추출
+// 퓨샷 프롬프트 빌더
 // ============================================================
 function buildFewShotPrompt(target) {
   const data = FEWSHOT_DB[target];
@@ -89,7 +89,7 @@ ${NEG_PATTERNS}
 // ============================================================
 // API Route 핸들러
 // ============================================================
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -152,3 +152,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "서버 연결 실패", message: err.message });
   }
 }
+
+module.exports = handler;
