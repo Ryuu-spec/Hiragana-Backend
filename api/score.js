@@ -1,4 +1,4 @@
-import { FEWSHOT_DB, NEG_PATTERNS } from '../../data/fewshot_db';
+import { FEWSHOT_DB, NEG_PATTERNS } from '../fewshot_db';
 
 export const config = {
   api: { bodyParser: { sizeLimit: '10mb' } },
