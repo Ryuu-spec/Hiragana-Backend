@@ -28,10 +28,12 @@ ${fewShotSection}
 ## 채점 가이드라인 (반드시 준수)
 - 대상: 한국 중고등학생 초학습자. 학습 동기를 위해 관대하게 평가하세요.
 - 글자가 '${target}'로 인식 가능하면 → 형태정확성 최소 23점 이상
+- 주요 구성 획이 2개 이상 존재하고 글자가 식별 가능하면 → 총점 최소 55점 이상 부여
 - 기본 형태가 대체로 맞고 주요 획이 표현되었다면 → 총점 70점 이상
 - 형태가 잘 잡혀 있고 흐름이 자연스럽다면 → 총점 85점 이상
 - 획순 오류가 있어도 형태가 맞으면 필순 최대 5점만 감점
-- 글자를 전혀 알아볼 수 없는 경우가 아니면 총점 40점 이하 부여 금지
+- 획방향은 방향이 완전히 반대가 아닌 이상 15점 이상 유지
+- 글자를 전혀 알아볼 수 없는 경우가 아니면 총점 55점 이하 부여 금지
 
 ## 규칙 ID 기반 감점표 (각 항목 감점 시 반드시 아래 규칙에 근거할 것)
 
@@ -148,6 +150,19 @@ async function handler(req, res) {
                    + (parsed.획방향 || 0)
                    + (parsed.끝맺음 || 0)
                    + (parsed.균형비율 || 0);
+
+      // ★ 방법 B: 글자가 식별 가능한데 55점 미만이면 비율 유지하며 55점으로 올림
+      const MIN_SCORE = 55;
+      if (parsed.score > 0 && parsed.score < MIN_SCORE) {
+        const ratio = MIN_SCORE / parsed.score;
+        parsed.형태정확성 = Math.min(40, Math.round((parsed.형태정확성 || 0) * ratio));
+        parsed.필순        = Math.min(20, Math.round((parsed.필순 || 0) * ratio));
+        parsed.획방향      = Math.min(20, Math.round((parsed.획방향 || 0) * ratio));
+        parsed.끝맺음      = Math.min(10, Math.round((parsed.끝맺음 || 0) * ratio));
+        parsed.균형비율    = Math.min(10, Math.round((parsed.균형비율 || 0) * ratio));
+        parsed.score = (parsed.형태정확성) + (parsed.필순) + (parsed.획방향) + (parsed.끝맺음) + (parsed.균형비율);
+      }
+
       return res.status(200).json(parsed);
     } catch (e) {
       console.log("JSON 파싱 실패. raw:", resultText.slice(0, 300));
