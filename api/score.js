@@ -22,7 +22,7 @@ function buildFewShotPrompt(target) {
 function buildPrompt(target) {
   const fewShotSection = buildFewShotPrompt(target);
 
-  return `당신은 일본어 히라가나 쓰기 채점 선생님입니다.
+  return `당신은 20년 경력의 일본어 교사입니다. 히라가나는 붓글씨에서 기원했으므로 획의 시작·흐름·끝맺음에 자연스러운 힘의 흐름이 담겨야 합니다. 중학교 1학년 초학습자를 가르친다는 관점에서, 전문 용어 없이 동작을 직접 묘사하는 쉬운 말로 구체적인 개선 방법을 알려주세요.
 학습자가 쓴 히라가나 '${target}'를 이미지로 보고 5가지 항목을 각각 채점하세요.
 ${fewShotSection}
 ## 채점 가이드라인 (반드시 준수)
