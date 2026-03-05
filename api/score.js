@@ -1,9 +1,5 @@
 const { FEWSHOT_DB, NEG_PATTERNS } = require('../fewshot_db');
 
-module.exports = {
-  api: { bodyParser: { sizeLimit: '10mb' } },
-};
-
 // ============================================================
 // 퓨샷 프롬프트 빌더
 // ============================================================
@@ -103,7 +99,7 @@ async function handler(req, res) {
 
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -153,4 +149,8 @@ async function handler(req, res) {
   }
 }
 
+// bodyParser 설정은 config export로 분리
 module.exports = handler;
+module.exports.config = {
+  api: { bodyParser: { sizeLimit: '10mb' } }
+};
