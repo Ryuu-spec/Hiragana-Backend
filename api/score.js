@@ -116,12 +116,21 @@ async function handler(req, res) {
 
     const data = await response.json();
 
+    // ★ 디버그 로그 추가
+    console.log("Gemini HTTP status:", response.status);
+    console.log("Gemini response keys:", Object.keys(data));
+    if (data.error) {
+      console.log("Gemini error:", JSON.stringify(data.error));
+      return res.status(500).json({ error: "Gemini API 오류", detail: data.error });
+    }
     if (!data.candidates?.[0]) {
+      console.log("candidates 없음. full response:", JSON.stringify(data).slice(0, 500));
       return res.status(500).json({ error: "candidates 없음", detail: data });
     }
 
     const parts = data.candidates[0]?.content?.parts;
     if (!parts?.[0]) {
+      console.log("parts 없음:", JSON.stringify(data.candidates[0]).slice(0, 500));
       return res.status(500).json({ error: "parts 없음", detail: data });
     }
 
@@ -141,15 +150,16 @@ async function handler(req, res) {
                    + (parsed.균형비율 || 0);
       return res.status(200).json(parsed);
     } catch (e) {
+      console.log("JSON 파싱 실패. raw:", resultText.slice(0, 300));
       return res.status(500).json({ error: "JSON 파싱 실패", raw: resultText });
     }
 
   } catch (err) {
+    console.log("fetch 실패:", err.message);
     return res.status(500).json({ error: "서버 연결 실패", message: err.message });
   }
 }
 
-// bodyParser 설정은 config export로 분리
 module.exports = handler;
 module.exports.config = {
   api: { bodyParser: { sizeLimit: '10mb' } }
