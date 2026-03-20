@@ -5,13 +5,37 @@ const { FEWSHOT_DB, getFilteredNEG } = require('../fewshot_db');
 // ============================================================
 const STROKE_RULES = {
 
-  // あ(3획)
-  // 1획(가로선): 왼쪽에서 시작
-  // 2획(세로+곡선): 1획 끝(오른쪽)에서 시작 → startX가 1획보다 오른쪽
-  // Y좌표는 두 획이 거의 같은 높이라 X로 구분
+  // あ(3획) — 형태 기반 획 분류
+  // 각 획을 모양으로 분류한 뒤 순서가 1→2→3인지 검증
+  //
+  // 획 분류 기준:
+  //   TYPE 1 (가로선): bounding box 가로(width) > 세로(height) × 1.5 → 수평으로 넓은 획
+  //   TYPE 2 (세로+곡선): bounding box 세로(height) > 가로(width) × 1.2 AND 끝점이 아래쪽
+  //   TYPE 3 (원/루프): pathLength / displacement > 4 → 경로가 변위보다 훨씬 길어 제자리를 많이 돌았음
   'あ': {
     expected: 3,
-    orderCheck: (s) => s[0].startX < s[1].startX
+    orderCheck: (s) => {
+      function classifyStroke(st) {
+        // 원 판별 우선: 경로 길이가 시작→끝 변위의 4배 이상이면 원
+        if (st.displacement > 0.01 && st.pathLength / st.displacement > 4) return 3;
+        // 가로선: 가로 bounding box가 세로의 1.5배 이상
+        if (st.width > st.height * 1.5) return 1;
+        // 세로+곡선: 세로 bounding box가 가로의 1.2배 이상
+        if (st.height > st.width * 1.2) return 2;
+        // 판별 불가
+        return 0;
+      }
+
+      if (s.length !== 3) return false;
+      const types = s.map(classifyStroke);
+      console.log(`あ 획 분류: [${types.join(', ')}]`);
+
+      // 분류 실패(0 포함)하면 판별 불가 → 예외 처리
+      if (types.includes(0)) return null;
+
+      // 정순: 1→2→3
+      return types[0] === 1 && types[1] === 2 && types[2] === 3;
+    }
   },
 
   // い(2획)
@@ -62,8 +86,10 @@ function calculateStrokeScore(target, strokeMeta) {
 
   // 획 수 정확 → 순서 검증
   try {
-    const orderCorrect = rule.orderCheck(strokeMeta.strokes);
-    return orderCorrect ? 20 : 14; // 순서 맞으면 만점, 틀리면 감점
+    const orderResult = rule.orderCheck(strokeMeta.strokes);
+    // null = 분류 실패 → AI 판단 유지
+    if (orderResult === null) return null;
+    return orderResult ? 20 : 14; // 순서 맞으면 만점, 틀리면 감점
   } catch (e) {
     return 16; // 검증 실패 시 중간값
   }
