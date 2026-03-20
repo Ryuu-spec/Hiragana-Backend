@@ -16,8 +16,8 @@ const STROKE_RULES = {
     expected: 3,
     orderCheck: (s) => {
       function classifyStroke(st) {
-        // 원 판별 우선: 경로 길이가 시작→끝 변위의 4배 이상이면 원
-        if (st.displacement > 0.01 && st.pathLength / st.displacement > 4) return 3;
+        // 원 판별 우선: 경로 길이가 시작→끝 변위의 2.5배 이상이면 원
+        if (st.displacement > 0.01 && st.pathLength / st.displacement > 2.5) return 3;
         // 가로선: 가로 bounding box가 세로의 1.5배 이상
         if (st.width > st.height * 1.5) return 1;
         // 세로+곡선: 세로 bounding box가 가로의 1.2배 이상
