@@ -260,6 +260,9 @@ async function handler(req, res) {
     try {
       const parsed = JSON.parse(cleaned);
 
+      // ★ Gemini 원본 점수 로그 (디버그용)
+      console.log(`[${trimmedTarget}] Gemini 원본 점수 — 형태:${parsed.형태정확성} 필순:${parsed.필순} 획방향:${parsed.획방향} 끝맺음:${parsed.끝맺음} 균형:${parsed.균형비율}`);
+
       // ★ 각 항목 상한 클램핑 (만점 초과 방지)
       parsed.형태정확성 = Math.min(40, Math.max(0, parsed.형태정확성 || 0));
       parsed.필순        = Math.min(20, Math.max(0, parsed.필순 || 0));
