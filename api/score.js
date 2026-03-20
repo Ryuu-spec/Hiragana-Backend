@@ -1,6 +1,43 @@
 const { FEWSHOT_DB, getFilteredNEG } = require('../fewshot_db');
 
 // ============================================================
+// 필순 계산 — 클라이언트 획 데이터 기반 (AI 판단 대체)
+// ============================================================
+const STROKE_RULES = {
+  // あ(3획): 1획(가로선)이 3획(원)보다 위에서 시작해야 함
+  'あ': { expected: 3, orderCheck: (s) => s[0].startY < s[2].startY },
+  // い(2획): 왼쪽 획이 오른쪽 획보다 먼저
+  'い': { expected: 2, orderCheck: (s) => s[0].startX < s[1].startX },
+  // う(2획): 짧은 점(1획)이 U자(2획)보다 먼저 — 포인트 수로 구분
+  'う': { expected: 2, orderCheck: (s) => s[0].pointCount < s[1].pointCount },
+  // え(2획): 짧은 점(1획)이 가로+꺾임(2획)보다 먼저
+  'え': { expected: 2, orderCheck: (s) => s[0].pointCount < s[1].pointCount },
+  // お(3획): 가로선(1획)이 세로+원(2획)보다 위에서 시작
+  'お': { expected: 3, orderCheck: (s) => s[0].startY < s[1].startY },
+};
+
+function calculateStrokeScore(target, strokeMeta) {
+  const rule = STROKE_RULES[target];
+  // 규칙 없거나 획 데이터 없으면 null → AI 판단 유지
+  if (!rule || !Array.isArray(strokeMeta?.strokes) || strokeMeta.strokes.length === 0) {
+    return null;
+  }
+
+  const countDiff = Math.abs((strokeMeta.count || 0) - rule.expected);
+
+  if (countDiff >= 2) return 8;   // 획 수 2개 이상 틀림
+  if (countDiff === 1) return 13; // 획 수 1개 틀림
+
+  // 획 수 정확 → 순서 검증
+  try {
+    const orderCorrect = rule.orderCheck(strokeMeta.strokes);
+    return orderCorrect ? 20 : 14; // 순서 맞으면 만점, 틀리면 감점
+  } catch (e) {
+    return 16; // 검증 실패 시 중간값
+  }
+}
+
+// ============================================================
 // 퓨샷 프롬프트 빌더
 // ============================================================
 function buildFewShotPrompt(target) {
@@ -34,6 +71,7 @@ ${fewShotSection}
 - 획순 오류가 있어도 형태가 맞으면 필순 최대 5점만 감점
 - 획방향은 방향이 완전히 반대가 아닌 이상 15점 이상 유지
 - 글자를 전혀 알아볼 수 없는 경우가 아니면 총점 55점 이하 부여 금지
+- ※ 필순 점수는 시스템이 실제 획 순서 데이터로 자동 계산해 덮어씁니다. 필순 항목은 참고용으로만 채점하고, feedback에서 필순 문제를 주요 개선점으로 언급하지 마세요.
 
 ## 원형·루프 획 평가 기준 (중요)
 - 원이나 루프 형태의 획은 **시각적으로 둥글고 닫혀 보이면** 완성된 것으로 평가하세요.
@@ -117,7 +155,7 @@ async function handler(req, res) {
     return res.status(400).json({ error: '요청 바디가 없거나 잘못된 형식입니다.' });
   }
 
-  const { target, imageData } = req.body;
+  const { target, imageData, strokeMeta } = req.body;
 
   // ── 4. target 검증 ───────────────────────────────────────────
   if (!target || typeof target !== 'string' || target.trim() === '') {
@@ -197,6 +235,13 @@ async function handler(req, res) {
       parsed.끝맺음      = Math.min(10, Math.max(0, parsed.끝맺음 || 0));
       parsed.균형비율    = Math.min(10, Math.max(0, parsed.균형비율 || 0));
 
+      // ★ 필순 덮어쓰기 — 클라이언트 획 데이터로 정확하게 계산
+      const calculatedStroke = calculateStrokeScore(trimmedTarget, strokeMeta);
+      if (calculatedStroke !== null) {
+        console.log(`필순 덮어쓰기: AI ${parsed.필순} → 계산값 ${calculatedStroke}`);
+        parsed.필순 = calculatedStroke;
+      }
+
       // ★ 스마트 클램핑 — 획방향 최솟값 보정
       // 피드백에 실제 역방향(D-02) 언급이 없는데 15 미만이면 AI 실수로 판단해 15로 보정
       // 진짜 D-02 케이스(완전 반대 방향)는 피드백에 반드시 관련 키워드가 등장하므로 오탐 없음
@@ -213,14 +258,15 @@ async function handler(req, res) {
                    + (parsed.균형비율 || 0);
 
       // ★ 방법 B: 글자가 식별 가능한데 55점 미만이면 비율 유지하며 55점으로 올림
+      // 단, 필순은 이미 정확히 계산됐으므로 보정에서 제외
       const MIN_SCORE = 55;
       if (parsed.score > 0 && parsed.score < MIN_SCORE) {
         const ratio = MIN_SCORE / parsed.score;
         parsed.형태정확성 = Math.min(40, Math.round((parsed.형태정확성 || 0) * ratio));
-        parsed.필순        = Math.min(20, Math.round((parsed.필순 || 0) * ratio));
         parsed.획방향      = Math.min(20, Math.round((parsed.획방향 || 0) * ratio));
         parsed.끝맺음      = Math.min(10, Math.round((parsed.끝맺음 || 0) * ratio));
         parsed.균형비율    = Math.min(10, Math.round((parsed.균형비율 || 0) * ratio));
+        // 필순은 비율 보정 대상에서 제외 (이미 정확한 값)
         parsed.score = (parsed.형태정확성) + (parsed.필순) + (parsed.획방향) + (parsed.끝맺음) + (parsed.균형비율);
       }
 
