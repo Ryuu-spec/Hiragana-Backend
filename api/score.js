@@ -6,11 +6,12 @@ const { FEWSHOT_DB, getFilteredNEG } = require('../fewshot_db');
 const STROKE_RULES = {
 
   // あ(3획)
-  // 1획(가로선)이 2획(세로+곡선)보다 위에서 시작해야 함
-  // 원(3획)은 시작 위치가 가변적이라 1→2 순서만 검증
+  // 1획(가로선): 왼쪽에서 시작
+  // 2획(세로+곡선): 1획 끝(오른쪽)에서 시작 → startX가 1획보다 오른쪽
+  // Y좌표는 두 획이 거의 같은 높이라 X로 구분
   'あ': {
     expected: 3,
-    orderCheck: (s) => s[0].startY < s[1].startY
+    orderCheck: (s) => s[0].startX < s[1].startX
   },
 
   // い(2획)
