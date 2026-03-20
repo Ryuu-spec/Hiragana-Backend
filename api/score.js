@@ -1,4 +1,4 @@
-const { FEWSHOT_DB, NEG_PATTERNS } = require('../fewshot_db');
+const { FEWSHOT_DB, getFilteredNEG } = require('../fewshot_db');
 
 // ============================================================
 // 퓨샷 프롬프트 빌더
@@ -70,7 +70,7 @@ ${fewShotSection}
 - B-03: 획 간격이 너무 밀집하거나 벌어진 경우 → -2점
 
 ## 필수 감점 패턴 (NEG 샘플 — 아래 오류 감지 시 재량 없이 반드시 적용)
-${NEG_PATTERNS}
+${getFilteredNEG(target)}
 
 ## 채점 기준 (각 항목 최대값을 절대 초과하지 마세요)
 - 형태정확성 (0~40, 최대 40점): 획의 전체적인 형태가 '${target}'와 얼마나 닮았는가
@@ -154,7 +154,7 @@ async function handler(req, res) {
             ]
           }],
           generationConfig: {
-            thinkingConfig: { thinkingBudget: 0 }  // thinking 비활성화 — 속도 개선용, 정확도 차이 테스트 중
+            thinkingConfig: { thinkingBudget: 8192 }  // 추론 활성화 — 정확도 우선
           }
         })
       }
