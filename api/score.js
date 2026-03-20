@@ -154,7 +154,7 @@ async function handler(req, res) {
             ]
           }],
           generationConfig: {
-            thinkingConfig: { thinkingBudget: 8192 }  // 추론 활성화 — 정확도 우선
+            thinkingConfig: { thinkingBudget: 2048 }  // 추론 활성화 — 속도·정확도 균형
           }
         })
       }
@@ -196,6 +196,15 @@ async function handler(req, res) {
       parsed.획방향      = Math.min(20, Math.max(0, parsed.획방향 || 0));
       parsed.끝맺음      = Math.min(10, Math.max(0, parsed.끝맺음 || 0));
       parsed.균형비율    = Math.min(10, Math.max(0, parsed.균형비율 || 0));
+
+      // ★ 스마트 클램핑 — 획방향 최솟값 보정
+      // 피드백에 실제 역방향(D-02) 언급이 없는데 15 미만이면 AI 실수로 판단해 15로 보정
+      // 진짜 D-02 케이스(완전 반대 방향)는 피드백에 반드시 관련 키워드가 등장하므로 오탐 없음
+      const hasRealDirectionError = /반대|역방향|D-02|완전히 반대|거꾸로/.test(parsed.feedback || '');
+      if (parsed.획방향 < 15 && !hasRealDirectionError) {
+        console.log(`획방향 스마트 보정: ${parsed.획방향} → 15 (역방향 언급 없음)`);
+        parsed.획방향 = 15;
+      }
 
       parsed.score = (parsed.형태정확성 || 0)
                    + (parsed.필순 || 0)
