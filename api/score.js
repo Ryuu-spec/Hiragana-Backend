@@ -290,9 +290,11 @@ async function handler(req, res) {
                    + (parsed.균형비율 || 0);
 
       // ★ 방법 B: 글자가 식별 가능한데 55점 미만이면 비율 유지하며 55점으로 올림
-      // 단, 필순은 이미 정확히 계산됐으므로 보정에서 제외
+      // 단, 형태정확성 20점 미만은 글자 자체를 못 쓴 것으로 보고 보정 미적용
+      // 필순은 이미 정확히 계산됐으므로 보정에서 제외
       const MIN_SCORE = 55;
-      if (parsed.score > 0 && parsed.score < MIN_SCORE) {
+      const isRecognizable = parsed.형태정확성 >= 20;
+      if (parsed.score > 0 && parsed.score < MIN_SCORE && isRecognizable) {
         const ratio = MIN_SCORE / parsed.score;
         parsed.형태정확성 = Math.min(40, Math.round((parsed.형태정확성 || 0) * ratio));
         parsed.획방향      = Math.min(20, Math.round((parsed.획방향 || 0) * ratio));
