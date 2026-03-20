@@ -6,64 +6,43 @@ const { FEWSHOT_DB, getFilteredNEG } = require('../fewshot_db');
 const STROKE_RULES = {
 
   // あ(3획)
-  // 1획: 가로선 — 세 획 중 가장 위에서 시작 + 가장 짧은 획
-  // 2획: 세로+곡선 — 가장 긴 획(포인트 최다)
-  // 3획: 원(루프) — 마지막
+  // 1획(가로선)이 2획(세로+곡선)보다 위에서 시작해야 함
+  // 원(3획)은 시작 위치가 가변적이라 1→2 순서만 검증
   'あ': {
     expected: 3,
-    orderCheck: (s) => {
-      const firstIsHighest  = s[0].startY < s[1].startY && s[0].startY < s[2].startY;
-      const firstIsShortest = s[0].pointCount <= s[1].pointCount && s[0].pointCount <= s[2].pointCount;
-      return firstIsHighest && firstIsShortest;
-    }
+    orderCheck: (s) => s[0].startY < s[1].startY
   },
 
   // い(2획)
-  // 1획: 왼쪽에서 시작 + 더 긴 획 (오른쪽 아래 대각선으로 내려오는 곡선)
-  // 2획: 오른쪽에서 시작 + 더 짧은 획
+  // 1획(왼쪽 사선)이 2획(오른쪽 짧은 선)보다 왼쪽에서 시작
   'い': {
     expected: 2,
-    orderCheck: (s) => {
-      const firstIsLeft   = s[0].startX < s[1].startX;
-      const firstIsLonger = s[0].pointCount >= s[1].pointCount;
-      return firstIsLeft && firstIsLonger;
-    }
+    orderCheck: (s) => s[0].startX < s[1].startX
   },
 
   // う(2획)
-  // 1획: 상단 짧은 점 사선 — 더 위에서 시작 + 포인트 적음
-  // 2획: U자 — 더 아래에서 시작 + 포인트 많음
+  // 1획(상단 점 사선)이 2획(U자)보다 위에서 시작
   'う': {
     expected: 2,
-    orderCheck: (s) => {
-      const firstIsHigher  = s[0].startY < s[1].startY;
-      const firstIsShorter = s[0].pointCount < s[1].pointCount;
-      return firstIsHigher && firstIsShorter;
-    }
+    orderCheck: (s) => s[0].startY < s[1].startY
   },
 
   // え(2획)
-  // 1획: 상단 짧은 점 사선 — 더 위에서 시작 + 포인트 적음
-  // 2획: 수평선+꺾임+파도 — 복잡하고 긴 획
+  // 1획(상단 점 사선)이 2획(수평선+꺾임)보다 위에서 시작
   'え': {
     expected: 2,
-    orderCheck: (s) => {
-      const firstIsHigher  = s[0].startY < s[1].startY;
-      const firstIsShorter = s[0].pointCount < s[1].pointCount;
-      return firstIsHigher && firstIsShorter;
-    }
+    orderCheck: (s) => s[0].startY < s[1].startY
   },
 
   // お(3획)
-  // 1획: 가로선 — 세 획 중 가장 위에서 시작 + 짧음
-  // 2획: 세로+타원루프 — 가장 복잡한 획(포인트 최다)
-  // 3획: 오른쪽 위 짧은 사선 — 오른쪽에서 시작 + 짧음
+  // 1획(가로선)이 2획(세로+타원루프)보다 위에서 시작
+  // 3획(오른쪽 짧은 사선)은 오른쪽 영역(startX > 0.5)에서 시작
   'お': {
     expected: 3,
     orderCheck: (s) => {
-      const firstIsHighest     = s[0].startY < s[1].startY && s[0].startY < s[2].startY;
-      const secondIsMostPoints = s[1].pointCount >= s[0].pointCount && s[1].pointCount >= s[2].pointCount;
-      return firstIsHighest && secondIsMostPoints;
+      const firstAboveSecond = s[0].startY < s[1].startY;
+      const thirdIsRight     = s[2].startX > 0.4;
+      return firstAboveSecond && thirdIsRight;
     }
   },
 };
