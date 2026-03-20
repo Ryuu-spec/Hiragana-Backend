@@ -4,16 +4,68 @@ const { FEWSHOT_DB, getFilteredNEG } = require('../fewshot_db');
 // 필순 계산 — 클라이언트 획 데이터 기반 (AI 판단 대체)
 // ============================================================
 const STROKE_RULES = {
-  // あ(3획): 1획(가로선)이 3획(원)보다 위에서 시작해야 함
-  'あ': { expected: 3, orderCheck: (s) => s[0].startY < s[2].startY },
-  // い(2획): 왼쪽 획이 오른쪽 획보다 먼저
-  'い': { expected: 2, orderCheck: (s) => s[0].startX < s[1].startX },
-  // う(2획): 짧은 점(1획)이 U자(2획)보다 먼저 — 포인트 수로 구분
-  'う': { expected: 2, orderCheck: (s) => s[0].pointCount < s[1].pointCount },
-  // え(2획): 짧은 점(1획)이 가로+꺾임(2획)보다 먼저
-  'え': { expected: 2, orderCheck: (s) => s[0].pointCount < s[1].pointCount },
-  // お(3획): 가로선(1획)이 세로+원(2획)보다 위에서 시작
-  'お': { expected: 3, orderCheck: (s) => s[0].startY < s[1].startY },
+
+  // あ(3획)
+  // 1획: 가로선 — 세 획 중 가장 위에서 시작 + 가장 짧은 획
+  // 2획: 세로+곡선 — 가장 긴 획(포인트 최다)
+  // 3획: 원(루프) — 마지막
+  'あ': {
+    expected: 3,
+    orderCheck: (s) => {
+      const firstIsHighest  = s[0].startY < s[1].startY && s[0].startY < s[2].startY;
+      const firstIsShortest = s[0].pointCount <= s[1].pointCount && s[0].pointCount <= s[2].pointCount;
+      return firstIsHighest && firstIsShortest;
+    }
+  },
+
+  // い(2획)
+  // 1획: 왼쪽에서 시작 + 더 긴 획 (오른쪽 아래 대각선으로 내려오는 곡선)
+  // 2획: 오른쪽에서 시작 + 더 짧은 획
+  'い': {
+    expected: 2,
+    orderCheck: (s) => {
+      const firstIsLeft   = s[0].startX < s[1].startX;
+      const firstIsLonger = s[0].pointCount >= s[1].pointCount;
+      return firstIsLeft && firstIsLonger;
+    }
+  },
+
+  // う(2획)
+  // 1획: 상단 짧은 점 사선 — 더 위에서 시작 + 포인트 적음
+  // 2획: U자 — 더 아래에서 시작 + 포인트 많음
+  'う': {
+    expected: 2,
+    orderCheck: (s) => {
+      const firstIsHigher  = s[0].startY < s[1].startY;
+      const firstIsShorter = s[0].pointCount < s[1].pointCount;
+      return firstIsHigher && firstIsShorter;
+    }
+  },
+
+  // え(2획)
+  // 1획: 상단 짧은 점 사선 — 더 위에서 시작 + 포인트 적음
+  // 2획: 수평선+꺾임+파도 — 복잡하고 긴 획
+  'え': {
+    expected: 2,
+    orderCheck: (s) => {
+      const firstIsHigher  = s[0].startY < s[1].startY;
+      const firstIsShorter = s[0].pointCount < s[1].pointCount;
+      return firstIsHigher && firstIsShorter;
+    }
+  },
+
+  // お(3획)
+  // 1획: 가로선 — 세 획 중 가장 위에서 시작 + 짧음
+  // 2획: 세로+타원루프 — 가장 복잡한 획(포인트 최다)
+  // 3획: 오른쪽 위 짧은 사선 — 오른쪽에서 시작 + 짧음
+  'お': {
+    expected: 3,
+    orderCheck: (s) => {
+      const firstIsHighest     = s[0].startY < s[1].startY && s[0].startY < s[2].startY;
+      const secondIsMostPoints = s[1].pointCount >= s[0].pointCount && s[1].pointCount >= s[2].pointCount;
+      return firstIsHighest && secondIsMostPoints;
+    }
+  },
 };
 
 function calculateStrokeScore(target, strokeMeta) {
