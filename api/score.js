@@ -152,7 +152,10 @@ async function handler(req, res) {
               { text: prompt },
               { inline_data: { mime_type: "image/jpeg", data: base64Data } }
             ]
-          }]
+          }],
+          generationConfig: {
+            thinkingConfig: { thinkingBudget: 0 }  // thinking 비활성화 — 속도 개선용, 정확도 차이 테스트 중
+          }
         })
       }
     );
