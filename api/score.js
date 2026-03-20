@@ -100,10 +100,45 @@ async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { target, imageData } = req.body;
+  // ── 1. HTTP 메서드 검증 ──────────────────────────────────────
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: '허용되지 않는 메서드입니다. POST만 허용됩니다.' });
+  }
+
+  // ── 2. 환경변수 검증 ─────────────────────────────────────────
   const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.error('GEMINI_API_KEY 환경변수가 설정되지 않았습니다.');
+    return res.status(500).json({ error: 'API 키가 서버에 설정되지 않았습니다.' });
+  }
+
+  // ── 3. 요청 바디 존재 여부 검증 ──────────────────────────────
+  if (!req.body || typeof req.body !== 'object') {
+    return res.status(400).json({ error: '요청 바디가 없거나 잘못된 형식입니다.' });
+  }
+
+  const { target, imageData } = req.body;
+
+  // ── 4. target 검증 ───────────────────────────────────────────
+  if (!target || typeof target !== 'string' || target.trim() === '') {
+    return res.status(400).json({ error: 'target 값이 없거나 잘못되었습니다.' });
+  }
+  const trimmedTarget = target.trim();
+
+  // ── 5. imageData 검증 ────────────────────────────────────────
+  if (!imageData || typeof imageData !== 'string' || imageData.trim() === '') {
+    return res.status(400).json({ error: 'imageData 값이 없거나 비어 있습니다.' });
+  }
+
+  // base64 추출: data URL 접두사 제거
   const base64Data = imageData.includes(',') ? imageData.split(',')[1] : imageData;
-  const prompt = buildPrompt(target);
+
+  // base64 최소 길이 검증 (빈 캔버스 방지 — 300×300 흰 이미지는 약 3000자 이상)
+  if (base64Data.length < 100) {
+    return res.status(400).json({ error: '이미지 데이터가 너무 짧습니다. 글자를 먼저 써주세요.' });
+  }
+
+  const prompt = buildPrompt(trimmedTarget);
 
   try {
     const response = await fetch(
