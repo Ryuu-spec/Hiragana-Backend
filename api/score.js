@@ -1,18 +1,15 @@
 // ============================================================
-// score.js  v2.4 — 기하학 게이트: AI 대신 좌표로 직접 판별
+// score.js  v2.5 — 형태정확성 하드캡 → 소프트 패널티 전환
 // ============================================================
-// [v2.3 → v2.4 주요 변경]
-// analyzeStrokeGeometry() 신설 — strokeMeta 좌표 데이터 직접 계산
-//   • あ 루프 감지:   pathLength/displacement 비율 > 2.0 → 닫힘
-//                    닫힘 실패 → 형태정확성 상한 22점 강제 (Step B2)
-//   • 왼쪽 돌출 감지: 3획 width / 평균 width > 0.4 → 돌출 있음
-//                    돌출 없음 → 균형비율 -2점
-//   • Aspect Ratio:  avgW/avgH 비율 0.5~2.0 벗어나면 상한 22점
-// AI 판단 완전 배제 → 동일 글씨 재채점 시 동일 결과 보장
+// [v2.4 → v2.5 주요 변경]
+// 루프/Aspect Ratio 판정 방식 전환:
+//   하드캡: "22점 초과 불가" → 좋은 글씨도 22점에 뭉침  ❌
+//   패널티: "열리면 -8점"   → 잘 쓰면 30점대, 못 쓰면 자연 하락  ✅
+// 중첩 방지: loopPenalty + aspectPenalty 합계 최대 -8점
 // ────────────────────────────────────────────────────────────
+// [v2.3 → v2.4 누적] analyzeStrokeGeometry 신설, minX 비교, closingDist
 // [v2.2 → v2.3 누적] 형태정확성 3단계 순차 판정 게이트
-// [v2.1 → v2.2 누적] Group A/B 분류, 5대 루브릭 명칭 수정
-// [v2.0 → v2.1 누적] Safe Zone ±20%, 균형비율 floor, 루프 3단계
+// [v2.0 → v2.2 누적] Safe Zone ±20%, Group A/B, 균형비율 floor
 // [v1.x → v2.0 누적] 가산제, 급소 함수, floor 3개, thinkingBudget 1024
 // ============================================================
 
@@ -110,9 +107,11 @@ function calculateStrokeScore(target, strokeMeta) {
 function analyzeStrokeGeometry(target, strokeMeta) {
   const result = {
     structureGateFail:  false,  // 1단계 구조 게이트 FAIL 여부
-    shapeCapScore:      null,   // 형태정확성 상한 (null = 제한 없음)
-    hasLeftProtrusion:  null,   // 왼쪽 돌출 여부 (null = 판별 불가)
-    aspectRatioFail:    false,  // Aspect Ratio 왜곡 여부
+    shapeCapScore:      null,   // 형태정확성 상한 — 더 이상 사용 안 함 (v2.5 패널티 방식으로 전환)
+    loopPenalty:        0,      // 루프 열림 패널티 (-8점)
+    aspectPenalty:      0,      // Aspect Ratio 패널티 (-8점)
+    hasLeftProtrusion:  null,   // 왼쪽 돌출 여부
+    aspectRatioFail:    false,
   };
 
   if (!Array.isArray(strokeMeta?.strokes) || strokeMeta.strokes.length === 0) return result;
@@ -138,10 +137,10 @@ function analyzeStrokeGeometry(target, strokeMeta) {
 
     if (!loopClosed) {
       result.structureGateFail = true;
-      result.shapeCapScore = 22;
-      console.log(`あ 구조 게이트 FAIL — 루프 열림 (closingDist/pathLength: ${loopRatio.toFixed(2)}) → 형태정확성 상한 22`);
+      result.loopPenalty = 8;  // 소프트 패널티 — 상한 대신 -8점 감산
+      console.log(`あ 루프 열림 — 패널티 -8점 적용 (closingDist/pathLength: ${loopRatio.toFixed(2)})`);
     } else {
-      console.log(`あ 구조 게이트 PASS — 루프 닫힘 (closingDist/pathLength: ${loopRatio.toFixed(2)})`);
+      console.log(`あ 루프 닫힘 PASS — 패널티 없음 (closingDist/pathLength: ${loopRatio.toFixed(2)})`);
     }
 
     // [왼쪽 돌출 감지] — minX 직접 비교 (v2.4 개선)
@@ -168,10 +167,9 @@ function analyzeStrokeGeometry(target, strokeMeta) {
 
     // 정상 범위: 0.67 ~ 1.5 (세로가 가로의 1.5배 이내, 가로가 세로의 1.5배 이내)
     result.aspectRatioFail = (ratio < 0.5 || ratio > 2.0);
-
-    if (result.aspectRatioFail && result.shapeCapScore === null) {
-      result.shapeCapScore = 22;
-      console.log(`Aspect Ratio 왜곡 — ratio: ${ratio.toFixed(2)} → 형태정확성 상한 22`);
+    if (result.aspectRatioFail) {
+      result.aspectPenalty = 8;  // 소프트 패널티 -8점
+      console.log(`Aspect Ratio 왜곡 — 패널티 -8점 적용 (ratio: ${ratio.toFixed(2)})`);
     }
   }
 
@@ -535,14 +533,17 @@ async function handler(req, res) {
         parsed.필순 = calculatedStroke;
       }
 
-      // ─ Step B2: 기하학 게이트 (strokeMeta 좌표 직접 계산) ──
-      // AI 판단을 신뢰하지 않고, 좌표 데이터로 루프/돌출/비율을 직접 판별
+      // ─ Step B2: 기하학 패널티 (strokeMeta 좌표 직접 계산) ──
+      // 하드캡(상한) 방식 폐기 → 소프트 패널티(-8점 감산) 방식으로 전환
+      // 효과: 루프 닫힌 좋은 글씨는 AI 원점수 유지, 루프 열리면 -8점만 적용
       const geo = analyzeStrokeGeometry(trimmedTarget, strokeMeta);
 
-      // 형태정확성 상한 적용 (구조 게이트 FAIL 또는 Aspect Ratio 왜곡)
-      if (geo.shapeCapScore !== null && parsed.형태정확성 > geo.shapeCapScore) {
-        console.log(`기하학 게이트 — 형태정확성 ${parsed.형태정확성} → 상한 ${geo.shapeCapScore} 강제 적용`);
-        parsed.형태정확성 = geo.shapeCapScore;
+      // 루프 패널티 적용 (중첩 방지: loopPenalty + aspectPenalty 합계 최대 -8점)
+      const totalShapePenalty = Math.min(8, geo.loopPenalty + geo.aspectPenalty);
+      if (totalShapePenalty > 0) {
+        const before = parsed.형태정확성;
+        parsed.형태정확성 = Math.max(0, parsed.형태정확성 - totalShapePenalty);
+        console.log(`기하학 패널티 -${totalShapePenalty}점 → 형태정확성 ${before} → ${parsed.형태정확성}`);
       }
 
       // 왼쪽 돌출 없음 → 균형비율 -2점 (최소 3점)
