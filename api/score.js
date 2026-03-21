@@ -185,7 +185,7 @@ function analyzeStrokeGeometry(target, strokeMeta) {
     // [루프 닫힘] P5(시작)~P7(끝) 거리 vs pathLength 비율
     const closingDist = dist(P5, P7);
     const loopRatio = loop.pathLength > 0.01 ? closingDist / loop.pathLength : 0;
-    const loopClosed = loop.pathLength > 0.01 && loopRatio < 0.35;
+    const loopClosed = loop.pathLength > 0.01 && loopRatio < 0.25;  // v2.7: 기준 강화 (0.35→0.25)
 
     if (!loopClosed) {
       result.structureGateFail = true;
@@ -199,6 +199,36 @@ function analyzeStrokeGeometry(target, strokeMeta) {
     const stroke2minX = s[1].minX ?? s[1].startX;
     result.hasLeftProtrusion = P6[0] < (stroke2minX - 0.05);
     console.log(`あ 왼쪽 돌출: ${result.hasLeftProtrusion} (P6.x:${P6[0].toFixed(3)}, s2.minX:${stroke2minX.toFixed(3)})`);
+  }
+
+  // ── お 전용 분석 ───────────────────────────────────────────
+  if (target === 'お' && s.length === 3) {
+    // お의 2획(왼쪽 루프)이 닫혀 있는지 확인
+    // 2획이 루프 — pathLength / displacement 비율로 판정
+    const loop = s[1];  // お의 2획이 루프
+    if (loop && loop.pathLength > 0.01 && loop.displacement > 0.001) {
+      const loopRatio = loop.displacement / loop.pathLength;
+      const loopClosed = loopRatio < 0.30;  // 열린 C자는 ratio가 높음
+      if (!loopClosed) {
+        result.structureGateFail = true;
+        result.loopPenalty = 8;
+        console.log(\`お 루프 열림 — 패널티 -8 (ratio: \${loopRatio.toFixed(3)})\`);
+      } else {
+        console.log(\`お 루프 닫힘 PASS (ratio: \${loopRatio.toFixed(3)})\`);
+      }
+    }
+
+    // お의 3획 위치 검사: 3획이 2획 오른쪽 상단에 독립적으로 있어야 함
+    if (s[2]) {
+      const loop2 = s[1], stroke3 = s[2];
+      // 3획 시작점이 2획의 오른쪽 경계보다 안쪽(왼쪽)이면 루프 안에 그린 것
+      const loop2maxX = loop2.maxX ?? loop2.endX;
+      const s3startX  = stroke3.startX;
+      if (s3startX < loop2maxX - 0.05) {
+        result.loopPenalty = (result.loopPenalty || 0) + 4;
+        console.log(\`お 3획 위치 오류 — 루프 안/왼쪽에 위치 (s3.startX:\${s3startX.toFixed(3)}, loop2.maxX:\${loop2maxX.toFixed(3)})\`);
+      }
+    }
   }
 
   // ── Group A Aspect Ratio 검사 (あ・え・お) ──────────────────
