@@ -225,7 +225,54 @@ ${getFilteredNEG(target)}
 {"글자형상":숫자,"필순":숫자,"정성":숫자,"feedback":"한국어 2~3문장. 잘된점 먼저. [60미만]핵심1가지. [60~79]잘된점+개선1. [80↑]칭찬위주."}`;
 }
 
-// ⑨ 핸들러
+// ⑨ 오버레이 힌트 생성
+function generateOverlayHints(target, strokeMeta, geo) {
+  const hints = [];
+  const s = strokeMeta?.strokes;
+  if (!Array.isArray(s) || !s.length) return hints;
+
+  if (target === 'あ' && s.length === 3) {
+    const an = extractAnchors('あ', strokeMeta);
+    if (an) {
+      const { P5, P6, P7 } = an;
+      const [s1, s2] = s;
+      const crossX = s2.startX;
+      const crossY = s1.startY + (s1.endY - s1.startY) * 0.45;
+      const d = Math.sqrt(Math.pow(P5[0]-crossX,2)+Math.pow(P5[1]-crossY,2));
+      if (d > 0.14) {
+        hints.push({type:'problem', x:P5[0], y:P5[1], label:'원 시작점이 너무 멀어요'});
+        hints.push({type:'target', x:crossX+0.04, y:crossY-0.04, label:'여기서 시작'});
+        hints.push({type:'arrow', fromX:P5[0], fromY:P5[1], toX:crossX+0.04, toY:crossY-0.04});
+      }
+      if (geo.hasLeftProtrusion === false)
+        hints.push({type:'arrow_left', fromX:P6[0], fromY:P6[1], toX:Math.max(0,P6[0]-0.14), toY:P6[1], label:'왼쪽으로 더 뻗어요'});
+      if (geo.loopPenalty >= 5)
+        hints.push({type:'close_loop', fromX:P7[0], fromY:P7[1], toX:P5[0], toY:P5[1], label:'원을 닫아주세요'});
+      if (geo.loopDirWrong) {
+        const cx=(P5[0]+P6[0]+P7[0])/3, cy=(P5[1]+P6[1]+P7[1])/3;
+        hints.push({type:'direction', x:cx, y:cy, label:'반시계 방향으로 그려요'});
+      }
+    }
+  }
+
+  if (target === 'お' && s.length === 3) {
+    const loop = s[1];
+    if (geo.loopPenalty >= 5)
+      hints.push({type:'close_loop', fromX:loop.endX, fromY:loop.endY, toX:loop.startX, toY:loop.startY, label:'원을 닫아주세요'});
+    if (geo.loopDirWrong)
+      hints.push({type:'direction', x:(loop.startX+loop.endX)/2, y:(loop.startY+loop.endY)/2, label:'반시계 방향으로 그려요'});
+  }
+
+  if (target === 'い' && s.length === 2) {
+    const [s1] = s;
+    if (s1.height > s1.width * 2.5)
+      hints.push({type:'arrow', fromX:s1.startX, fromY:s1.startY, toX:s1.startX+0.15, toY:s1.startY+0.3, label:'오른쪽 아래로 사선'});
+  }
+
+  return hints;
+}
+
+// ⑩ 핸들러
 async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Credentials','true');
   res.setHeader('Access-Control-Allow-Origin','*');
@@ -291,6 +338,11 @@ async function handler(req, res) {
 
       p.score = (p.글자형상||0)+(p.필순||0)+(p.배열||0)+(p.정성||0);
       console.log(`[${trimmed}] 최종 ${p.score}점 (형상${p.글자형상} 필순${p.필순} 배열${p.배열} 정성${p.정성})`);
+
+      // 오버레이 힌트 생성
+      p.overlayHints = generateOverlayHints(trimmed, strokeMeta, geo);
+      console.log(`오버레이 힌트 ${p.overlayHints.length}개`);
+
       return res.status(200).json(p);
 
     } catch(e) {
