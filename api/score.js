@@ -260,8 +260,12 @@ function generateOverlayHints(target, strokeMeta, geo) {
     if (an) {
       const { P5, P6, P7 } = an;
       const [s1, s2] = s;
+      // 교차점 추정:
+      //   x = s2의 x 위치 (세로획이 가로획을 통과하는 x)
+      //   y = s1의 y 중간값 (가로획이 지나가는 높이)
+      //   → s2.startY는 세로획 맨 위라 너무 높음 → s1 y레벨 사용
       const crossX = s2.startX;
-      const crossY = s2.startY; // s2 시작점 = 실제 교차 위치
+      const crossY = (s1.startY + s1.endY) / 2;
       const d = Math.sqrt(Math.pow(P5[0]-crossX,2)+Math.pow(P5[1]-crossY,2));
       if (d > 0.20) {
         hints.push({type:'problem', x:P5[0], y:P5[1], label:'원 시작점이 너무 멀어요'});
