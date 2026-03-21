@@ -1,16 +1,19 @@
 // ============================================================
-// score.js  v2.5 — 형태정확성 하드캡 → 소프트 패널티 전환
+// score.js  v2.6 — 앵커 포인트(P1~P7) 기반 좌표 채점 엔진
 // ============================================================
-// [v2.4 → v2.5 주요 변경]
-// 루프/Aspect Ratio 판정 방식 전환:
-//   하드캡: "22점 초과 불가" → 좋은 글씨도 22점에 뭉침  ❌
-//   패널티: "열리면 -8점"   → 잘 쓰면 30점대, 못 쓰면 자연 하락  ✅
-// 중첩 방지: loopPenalty + aspectPenalty 합계 최대 -8점
+// [v2.5 → v2.6 주요 변경]
+// extractAnchors() 신설 — points 배열에서 あ의 7개 앵커 포인트 직접 추출
+//   P1~P2: 1획(가로선) 시작/끝
+//   P3~P4: 2획(세로선) 시작/끝
+//   P5~P7: 3획(루프) 시작/최좌점/끝
+// dist(), angleDeg() 유틸 함수 추가
+// analyzeStrokeGeometry → 앵커 포인트 기반으로 재작성
+// 프론트엔드: points 배열 전송 추가 (64포인트 균등 샘플링)
 // ────────────────────────────────────────────────────────────
-// [v2.3 → v2.4 누적] analyzeStrokeGeometry 신설, minX 비교, closingDist
-// [v2.2 → v2.3 누적] 형태정확성 3단계 순차 판정 게이트
-// [v2.0 → v2.2 누적] Safe Zone ±20%, Group A/B, 균형비율 floor
-// [v1.x → v2.0 누적] 가산제, 급소 함수, floor 3개, thinkingBudget 1024
+// [v2.4 → v2.5 누적] 하드캡 → 소프트 패널티 전환
+// [v2.3 → v2.4 누적] analyzeStrokeGeometry 신설, closingDist
+// [v2.0 → v2.3 누적] 3단계 게이트, Group A/B, Safe Zone ±20%
+// [v1.x → v2.0 누적] 가산제, 급소 함수, floor 3개
 // ============================================================
 
 const { FEWSHOT_DB, getFilteredNEG } = require('../fewshot_db');
@@ -100,76 +103,113 @@ function calculateStrokeScore(target, strokeMeta) {
 // 공통 루브릭 위에 글자마다 얹는 '교육적 급소'
 // ============================================================
 // ============================================================
-// ① - B: 기하학 분석 엔진 (v2.4 신설)
+// ① - A: 앵커 포인트 추출 엔진 (v2.6 신설)
+// points 배열에서 あ의 7개 핵심 좌표를 수학으로 직접 계산
+// 모든 좌표는 0~1 정규화 (캔버스 폭/높이 기준)
+//
+// あ 앵커 포인트 정의:
+//   P1 = 1획 시작점 (가로선 왼쪽 끝)
+//   P2 = 1획 끝점   (가로선 오른쪽 끝)
+//   P3 = 2획 시작점 (세로선 상단)
+//   P4 = 2획 끝점   (세로선 하단)
+//   P5 = 3획 시작점 (루프 시작)
+//   P6 = 3획 최좌점 (루프 가장 왼쪽 — 왼쪽 돌출 기준)
+//   P7 = 3획 끝점   (루프 닫힘 기준)
+// ============================================================
+function extractAnchors(target, strokeMeta) {
+  if (!Array.isArray(strokeMeta?.strokes)) return null;
+  const s = strokeMeta.strokes;
+
+  if (target === 'あ' && s.length === 3) {
+    const [s1, s2, s3] = s;
+
+    // points 배열이 있으면 직접 계산, 없으면 요약값으로 근사
+    const getMinXPoint = (st) => {
+      if (st.points?.length) {
+        return st.points.reduce((m, p) => p[0] < m[0] ? p : m);
+      }
+      return [st.minX ?? st.startX, st.minY ?? st.startY];
+    };
+
+    const P1 = [s1.startX, s1.startY];
+    const P2 = [s1.endX,   s1.endY];
+    const P3 = [s2.startX, s2.startY];
+    const P4 = [s2.endX,   s2.endY];
+    const P5 = [s3.startX, s3.startY];
+    const P6 = getMinXPoint(s3);   // 루프 최좌점
+    const P7 = [s3.endX,   s3.endY];
+
+    return { P1, P2, P3, P4, P5, P6, P7 };
+  }
+
+  return null;
+}
+
+// 두 점 사이 거리
+function dist(a, b) {
+  return Math.sqrt(Math.pow(b[0]-a[0], 2) + Math.pow(b[1]-a[1], 2));
+}
+
+// 두 점이 이루는 각도 (라디안 → 도)
+function angleDeg(from, to) {
+  return Math.atan2(to[1]-from[1], to[0]-from[0]) * 180 / Math.PI;
+}
+
+
+
 // AI 판단 대신 strokeMeta 좌표로 직접 계산
 // 반환값: { structureGateFail, shapeCapScore, hasLeftProtrusion, aspectRatioFail }
 // ============================================================
+// ============================================================
+// ① - B: 기하학 분석 엔진 (v2.6 — 앵커 포인트 기반)
+// ============================================================
 function analyzeStrokeGeometry(target, strokeMeta) {
   const result = {
-    structureGateFail:  false,  // 1단계 구조 게이트 FAIL 여부
-    shapeCapScore:      null,   // 형태정확성 상한 — 더 이상 사용 안 함 (v2.5 패널티 방식으로 전환)
-    loopPenalty:        0,      // 루프 열림 패널티 (-8점)
-    aspectPenalty:      0,      // Aspect Ratio 패널티 (-8점)
-    hasLeftProtrusion:  null,   // 왼쪽 돌출 여부
+    structureGateFail:  false,
+    loopPenalty:        0,
+    aspectPenalty:      0,
+    hasLeftProtrusion:  null,
     aspectRatioFail:    false,
   };
 
   if (!Array.isArray(strokeMeta?.strokes) || strokeMeta.strokes.length === 0) return result;
   const s = strokeMeta.strokes;
 
-  // ── あ 전용 분석 (3획 필수) ────────────────────────────────
+  // ── あ 전용 분석 ───────────────────────────────────────────
   if (target === 'あ' && s.length === 3) {
-    const loop = s[2]; // 3획
+    const anchors = extractAnchors('あ', strokeMeta);
+    if (!anchors) return result;
+    const { P5, P6, P7 } = anchors;
+    const loop = s[2];
 
-    // [루프 감지] 시작점-끝점 거리 / pathLength 비율
-    // 닫힌 루프: 끝점이 시작점 근처로 돌아옴 → 거리가 짧음
-    // 열린 루프: 끝점이 시작점과 멀리 떨어짐 → 거리가 김
-    const closingDist = Math.sqrt(
-      Math.pow(loop.endX - loop.startX, 2) +
-      Math.pow(loop.endY - loop.startY, 2)
-    );
-    // 시작-끝 거리가 전체 경로 길이의 35% 이하 → 닫힌 루프
-    const loopClosed = loop.pathLength > 0.01 &&
-                       (closingDist / loop.pathLength) < 0.35;
-    const loopRatio = loop.pathLength > 0.01
-      ? closingDist / loop.pathLength
-      : 0;
+    // [루프 닫힘] P5(시작)~P7(끝) 거리 vs pathLength 비율
+    const closingDist = dist(P5, P7);
+    const loopRatio = loop.pathLength > 0.01 ? closingDist / loop.pathLength : 0;
+    const loopClosed = loop.pathLength > 0.01 && loopRatio < 0.35;
 
     if (!loopClosed) {
       result.structureGateFail = true;
-      result.loopPenalty = 8;  // 소프트 패널티 — 상한 대신 -8점 감산
-      console.log(`あ 루프 열림 — 패널티 -8점 적용 (closingDist/pathLength: ${loopRatio.toFixed(2)})`);
+      result.loopPenalty = 8;
+      console.log(`あ 루프 열림 — 패널티 -8 (P5→P7/path: ${loopRatio.toFixed(3)})`);
     } else {
-      console.log(`あ 루프 닫힘 PASS — 패널티 없음 (closingDist/pathLength: ${loopRatio.toFixed(2)})`);
+      console.log(`あ 루프 닫힘 PASS (P5→P7/path: ${loopRatio.toFixed(3)})`);
     }
 
-    // [왼쪽 돌출 감지] — minX 직접 비교 (v2.4 개선)
-    // 3획의 최좌측 x가 2획의 최좌측 x보다 왼쪽이면 돌출 있음
-    const stroke2 = s[1];
-    if (loop.minX !== undefined && stroke2.minX !== undefined) {
-      // 글자폭의 5% 이상 왼쪽으로 나가야 유효한 돌출로 인정
-      result.hasLeftProtrusion = loop.minX < (stroke2.minX - 0.05);
-      console.log(`あ 왼쪽 돌출: ${result.hasLeftProtrusion} (loop.minX: ${loop.minX.toFixed(3)}, stroke2.minX: ${stroke2.minX.toFixed(3)})`);
-    } else {
-      // minX 없으면 구버전 width 방식으로 fallback
-      const avgWidth = s.reduce((acc, st) => acc + (st.width || 0), 0) / s.length;
-      result.hasLeftProtrusion = avgWidth > 0 ? (loop.width || 0) > avgWidth * 0.4 : null;
-      console.log(`あ 왼쪽 돌출 (fallback width): ${result.hasLeftProtrusion}`);
-    }
+    // [왼쪽 돌출] P6.x(루프 최좌) < 2획 최좌 x - 5%
+    const stroke2minX = s[1].minX ?? s[1].startX;
+    result.hasLeftProtrusion = P6[0] < (stroke2minX - 0.05);
+    console.log(`あ 왼쪽 돌출: ${result.hasLeftProtrusion} (P6.x:${P6[0].toFixed(3)}, s2.minX:${stroke2minX.toFixed(3)})`);
   }
 
   // ── Group A Aspect Ratio 검사 (あ・え・お) ──────────────────
   if (['あ', 'え', 'お'].includes(target) && s.length >= 2) {
-    // 전체 획의 평균 width / 평균 height 비율로 자형 가로세로 근사
     const avgW = s.reduce((acc, st) => acc + (st.width  || 0), 0) / s.length;
     const avgH = s.reduce((acc, st) => acc + (st.height || 0), 0) / s.length;
     const ratio = avgH > 0.01 ? avgW / avgH : 1;
-
-    // 정상 범위: 0.67 ~ 1.5 (세로가 가로의 1.5배 이내, 가로가 세로의 1.5배 이내)
     result.aspectRatioFail = (ratio < 0.5 || ratio > 2.0);
     if (result.aspectRatioFail) {
-      result.aspectPenalty = 8;  // 소프트 패널티 -8점
-      console.log(`Aspect Ratio 왜곡 — 패널티 -8점 적용 (ratio: ${ratio.toFixed(2)})`);
+      result.aspectPenalty = 8;
+      console.log(`Aspect Ratio 왜곡 — 패널티 -8 (ratio: ${ratio.toFixed(2)})`);
     }
   }
 
