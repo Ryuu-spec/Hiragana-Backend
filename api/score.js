@@ -311,7 +311,7 @@ async function handler(req, res) {
       //   형태정확성 28점 이상 (글자가 명확히 인식되는 수준) → 하한 17점
       //   형태정확성 28점 미만 (형태가 불분명한 수준)        → 하한 15점
       const hasRealDirectionError = /반대|역방향|D-02|완전히 반대|거꾸로/.test(parsed.feedback || '');
-      const directionFloor = parsed.형태정확성 >= 28 ? 17 : 15;
+      const directionFloor = parsed.형태정확성 >= 23 ? 17 : 15;
       if (parsed.획방향 < directionFloor && !hasRealDirectionError) {
         console.log(`획방향 스마트 보정: ${parsed.획방향} → ${directionFloor} (형태정확성 ${parsed.형태정확성}, 역방향 언급 없음)`);
         parsed.획방향 = directionFloor;
