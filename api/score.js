@@ -130,7 +130,7 @@ ${fewShotSection}
 - 획순 오류가 있어도 형태가 맞으면 필순 최대 5점만 감점
 - 획방향은 방향이 완전히 반대가 아닌 이상 17점 이상 유지 (형태가 인식 가능한 경우 기준)
 - 글자를 전혀 알아볼 수 없는 경우가 아니면 총점 55점 이하 부여 금지
-- 끝맺음: 획의 끝이 뭉툭하지 않고 시원하게 뻗었다면 각도가 표준과 다소 달라도 7점 이상 부여
+- 끝맺음: 획의 끝이 뭉툭하지 않고 시원하게 뻗었다면, 표준 궤적과 10~15도 달라도 '생동감 있는 필치'로 인정하여 최소 7점 이상 부여 (각도 차이만으로 4~5점대 부여 금지)
 - 미세 이탈 허용: 3획 시작점·교차점 등의 위치가 5~10% 이내로 벗어난 것은 자연스러운 손글씨로 인정하고 감점하지 말 것
 - ※ 필순 점수는 시스템이 실제 획 순서 데이터로 자동 계산해 덮어씁니다. 필순 항목은 참고용으로만 채점하고, feedback에서 필순 문제를 주요 개선점으로 언급하지 마세요.
 
@@ -306,13 +306,24 @@ async function handler(req, res) {
         parsed.필순 = calculatedStroke;
       }
 
+      // ★ 구조 붕괴 감지 — 이 플래그가 true이면 모든 상향 클램핑 비활성화
+      // 루프가 완전히 열렸거나, 3획이 교차점을 완전히 벗어났거나,
+      // 글자가 해독 불가 수준이면 클램핑으로 점수를 올리지 않음
+      const hasStructuralFailure = (
+        parsed.형태정확성 < 20 ||
+        /완성되지|열려|엉뚱|해독|교차점.*(벗어|이탈|못)|루프.*(없|열|미완)|F-02|F-04|F-05/.test(parsed.feedback || '')
+      );
+      if (hasStructuralFailure) {
+        console.log(`구조 붕괴 감지 — 모든 클램핑 비활성화 (형태정확성 ${parsed.형태정확성})`);
+      }
+
       // ★ 스마트 클램핑 — 끝맺음 최솟값 보정
-      // 획이 시원하게 뻗었으나 각도가 표준과 다소 달라 낮게 채점된 경우를 구제
-      // 피드백에 끝맺음 관련 중대 오류(획 생략·완전 반대 방향) 언급이 없는데
-      // 형태가 인식 가능(23점 이상)이면 끝맺음 최소 6점 보장
+      // 획의 끝이 시원하게 뻗어 있고 형태가 유지되었다면 표준 궤적과 10~15도 달라도
+      // '생동감 있는 필치'로 인정 — 중대 오류 언급이 없는 한 최소 7점 보장
+      // 중대 오류(획 끊김·생략·완전 반대 방향)는 피드백에 반드시 관련 키워드 등장하므로 오탐 없음
       const hasRealEndingError = /끊기|생략|뚝|없음|E-01|E-02|E-03/.test(parsed.feedback || '');
-      const endingFloor = parsed.형태정확성 >= 23 ? 6 : 4;
-      if (parsed.끝맺음 < endingFloor && !hasRealEndingError) {
+      const endingFloor = parsed.형태정확성 >= 23 ? 7 : 4;
+      if (!hasStructuralFailure && parsed.끝맺음 < endingFloor && !hasRealEndingError) {
         console.log(`끝맺음 스마트 보정: ${parsed.끝맺음} → ${endingFloor} (형태정확성 ${parsed.형태정확성}, 오류 언급 없음)`);
         parsed.끝맺음 = endingFloor;
       }
@@ -324,7 +335,7 @@ async function handler(req, res) {
       //   형태정확성 28점 미만 (형태가 불분명한 수준)        → 하한 15점
       const hasRealDirectionError = /반대|역방향|D-02|완전히 반대|거꾸로/.test(parsed.feedback || '');
       const directionFloor = parsed.형태정확성 >= 23 ? 17 : 15;
-      if (parsed.획방향 < directionFloor && !hasRealDirectionError) {
+      if (!hasStructuralFailure && parsed.획방향 < directionFloor && !hasRealDirectionError) {
         console.log(`획방향 스마트 보정: ${parsed.획방향} → ${directionFloor} (형태정확성 ${parsed.형태정확성}, 역방향 언급 없음)`);
         parsed.획방향 = directionFloor;
       }
@@ -336,10 +347,10 @@ async function handler(req, res) {
                    + (parsed.균형비율 || 0);
 
       // ★ 방법 B: 글자가 식별 가능한데 55점 미만이면 비율 유지하며 55점으로 올림
-      // 단, 형태정확성 20점 미만은 글자 자체를 못 쓴 것으로 보고 보정 미적용
+      // 단, 구조 붕괴 감지 시 또는 형태정확성 23점 미만은 보정 미적용
       // 필순은 이미 정확히 계산됐으므로 보정에서 제외
       const MIN_SCORE = 55;
-      const isRecognizable = parsed.형태정확성 >= 20;
+      const isRecognizable = !hasStructuralFailure && parsed.형태정확성 >= 23;
       if (parsed.score > 0 && parsed.score < MIN_SCORE && isRecognizable) {
         const ratio = MIN_SCORE / parsed.score;
         parsed.형태정확성 = Math.min(40, Math.round((parsed.형태정확성 || 0) * ratio));
