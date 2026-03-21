@@ -122,19 +122,26 @@ function analyzeStrokeGeometry(target, strokeMeta) {
   if (target === 'あ' && s.length === 3) {
     const loop = s[2]; // 3획
 
-    // [루프 감지] pathLength / displacement 비율
-    // 비율 > 1.6 → 획이 돌아오는 루프 형태 (닫힘)
-    // 비율 ≤ 1.6 → 직선성이 강함 (열림)
-    const loopRatio = (loop.displacement > 0.01)
-      ? loop.pathLength / loop.displacement
-      : 999; // displacement=0 이면 제자리 루프 → 닫힘으로 처리
-    const loopClosed = loopRatio > 1.6;
+    // [루프 감지] 시작점-끝점 거리 / pathLength 비율
+    // 닫힌 루프: 끝점이 시작점 근처로 돌아옴 → 거리가 짧음
+    // 열린 루프: 끝점이 시작점과 멀리 떨어짐 → 거리가 김
+    const closingDist = Math.sqrt(
+      Math.pow(loop.endX - loop.startX, 2) +
+      Math.pow(loop.endY - loop.startY, 2)
+    );
+    // 시작-끝 거리가 전체 경로 길이의 35% 이하 → 닫힌 루프
+    const loopClosed = loop.pathLength > 0.01 &&
+                       (closingDist / loop.pathLength) < 0.35;
+    const loopRatio = loop.pathLength > 0.01
+      ? closingDist / loop.pathLength
+      : 0;
 
     if (!loopClosed) {
-      // 1단계 구조 게이트 FAIL → 형태정확성 상한 22점
       result.structureGateFail = true;
       result.shapeCapScore = 22;
-      console.log(`あ 구조 게이트 FAIL — 루프 열림 (ratio: ${loopRatio.toFixed(2)}) → 형태정확성 상한 22`);
+      console.log(`あ 구조 게이트 FAIL — 루프 열림 (closingDist/pathLength: ${loopRatio.toFixed(2)}) → 형태정확성 상한 22`);
+    } else {
+      console.log(`あ 구조 게이트 PASS — 루프 닫힘 (closingDist/pathLength: ${loopRatio.toFixed(2)})`);
     }
 
     // [왼쪽 돌출 감지] — minX 직접 비교 (v2.4 개선)
