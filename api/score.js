@@ -120,7 +120,7 @@ function analyzeStrokeGeometry(target, strokeMeta) {
       // 루프 방향 — 스트로크 데이터 직접 계산 ★
       const dir = loop.direction || calcLoopDirection(loop.points);
       if (dir==='cw') {
-        result.loopPenalty = Math.min(10, result.loopPenalty + 4);
+        result.loopPenalty = Math.min(8, result.loopPenalty + 3);
         console.log(`あ 루프방향 오류 CW → 총패널티 ${result.loopPenalty}pt`);
       } else {
         console.log(`あ 루프방향 OK: ${dir||'불명'}`);
@@ -147,8 +147,8 @@ function analyzeStrokeGeometry(target, strokeMeta) {
     const avgW = s.reduce((a,st)=>a+(st.width||0),0)/s.length;
     const avgH = s.reduce((a,st)=>a+(st.height||0),0)/s.length;
     const r = avgH>0.01 ? avgW/avgH : 1;
-    if (r<0.5 || r>2.0) {
-      result.aspectPenalty = 6;
+    if (r < 0.40 || r > 2.20) {
+      result.aspectPenalty = 4;
       console.log(`AspectRatio 왜곡 -6pt (${r.toFixed(2)})`);
     }
   }
@@ -239,7 +239,7 @@ function generateOverlayHints(target, strokeMeta, geo) {
       const crossX = s2.startX;
       const crossY = s1.startY + (s1.endY - s1.startY) * 0.45;
       const d = Math.sqrt(Math.pow(P5[0]-crossX,2)+Math.pow(P5[1]-crossY,2));
-      if (d > 0.14) {
+      if (d > 0.20) {
         hints.push({type:'problem', x:P5[0], y:P5[1], label:'원 시작점이 너무 멀어요'});
         hints.push({type:'target', x:crossX+0.04, y:crossY-0.04, label:'여기서 시작'});
         hints.push({type:'arrow', fromX:P5[0], fromY:P5[1], toX:crossX+0.04, toY:crossY-0.04});
@@ -322,7 +322,7 @@ async function handler(req, res) {
 
       // 기하학 패널티
       const geo = analyzeStrokeGeometry(trimmed, strokeMeta);
-      const pen = Math.min(10, geo.loopPenalty + geo.aspectPenalty);
+      const pen = Math.min(7, geo.loopPenalty + geo.aspectPenalty);
       if (pen>0) { p.글자형상 = Math.max(0,p.글자형상-pen); console.log(`패널티 -${pen}pt → 형상${p.글자형상}`); }
       if (geo.hasLeftProtrusion===false) { p.글자형상=Math.max(2,p.글자형상-2); console.log('왼돌출없음 -2pt'); }
 
