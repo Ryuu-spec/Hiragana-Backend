@@ -1,12 +1,16 @@
 // ============================================================
-// score.js  v2.3 — 형태정확성 3단계 순차 판정 게이트 구조
+// score.js  v2.4 — 기하학 게이트: AI 대신 좌표로 직접 판별
 // ============================================================
-// [v2.2 → v2.3 주요 변경]
-// 형태정확성을 "동시 다발 조건 체크"에서 "순차 Pass/Fail 게이트"로 재설계
-//   1단계 구조 게이트:  핵심 구조 파괴 여부 → 상한선 결정
-//   2단계 기하학 검증:  Aspect Ratio + 삼각형 여백, 총합 -8점 중첩 상한
-//   3단계 미학 가산:    획 유려함 + Klee One 유사도 +0~10점
+// [v2.3 → v2.4 주요 변경]
+// analyzeStrokeGeometry() 신설 — strokeMeta 좌표 데이터 직접 계산
+//   • あ 루프 감지:   pathLength/displacement 비율 > 2.0 → 닫힘
+//                    닫힘 실패 → 형태정확성 상한 22점 강제 (Step B2)
+//   • 왼쪽 돌출 감지: 3획 width / 평균 width > 0.4 → 돌출 있음
+//                    돌출 없음 → 균형비율 -2점
+//   • Aspect Ratio:  avgW/avgH 비율 0.5~2.0 벗어나면 상한 22점
+// AI 판단 완전 배제 → 동일 글씨 재채점 시 동일 결과 보장
 // ────────────────────────────────────────────────────────────
+// [v2.2 → v2.3 누적] 형태정확성 3단계 순차 판정 게이트
 // [v2.1 → v2.2 누적] Group A/B 분류, 5대 루브릭 명칭 수정
 // [v2.0 → v2.1 누적] Safe Zone ±20%, 균형비율 floor, 루프 3단계
 // [v1.x → v2.0 누적] 가산제, 급소 함수, floor 3개, thinkingBudget 1024
@@ -98,6 +102,70 @@ function calculateStrokeScore(target, strokeMeta) {
 // ② 글자별 급소 (Critical Points) — v2.0 신설
 // 공통 루브릭 위에 글자마다 얹는 '교육적 급소'
 // ============================================================
+// ============================================================
+// ① - B: 기하학 분석 엔진 (v2.4 신설)
+// AI 판단 대신 strokeMeta 좌표로 직접 계산
+// 반환값: { structureGateFail, shapeCapScore, hasLeftProtrusion, aspectRatioFail }
+// ============================================================
+function analyzeStrokeGeometry(target, strokeMeta) {
+  const result = {
+    structureGateFail:  false,  // 1단계 구조 게이트 FAIL 여부
+    shapeCapScore:      null,   // 형태정확성 상한 (null = 제한 없음)
+    hasLeftProtrusion:  null,   // 왼쪽 돌출 여부 (null = 판별 불가)
+    aspectRatioFail:    false,  // Aspect Ratio 왜곡 여부
+  };
+
+  if (!Array.isArray(strokeMeta?.strokes) || strokeMeta.strokes.length === 0) return result;
+  const s = strokeMeta.strokes;
+
+  // ── あ 전용 분석 (3획 필수) ────────────────────────────────
+  if (target === 'あ' && s.length === 3) {
+    const loop = s[2]; // 3획
+
+    // [루프 감지] pathLength / displacement 비율
+    // 비율 > 2.0 → 획이 돌아오는 루프 형태 (닫힘)
+    // 비율 ≤ 2.0 → 직선성이 강함 (열림)
+    const loopRatio = (loop.displacement > 0.01)
+      ? loop.pathLength / loop.displacement
+      : 999; // displacement=0 이면 제자리 루프 → 닫힘으로 처리
+    const loopClosed = loopRatio > 2.0;
+
+    if (!loopClosed) {
+      // 1단계 구조 게이트 FAIL → 형태정확성 상한 22점
+      result.structureGateFail = true;
+      result.shapeCapScore = 22;
+      console.log(`あ 구조 게이트 FAIL — 루프 열림 (ratio: ${loopRatio.toFixed(2)}) → 형태정확성 상한 22`);
+    }
+
+    // [왼쪽 돌출 감지]
+    // 3획의 width가 전체 글자폭 평균의 40% 이상이면 돌출 있음으로 판정
+    const avgWidth = s.reduce((acc, st) => acc + (st.width || 0), 0) / s.length;
+    result.hasLeftProtrusion = avgWidth > 0
+      ? (loop.width || 0) > avgWidth * 0.4
+      : null;
+    console.log(`あ 왼쪽 돌출: ${result.hasLeftProtrusion} (loop.width: ${(loop.width||0).toFixed(3)}, avg: ${avgWidth.toFixed(3)})`);
+  }
+
+  // ── Group A Aspect Ratio 검사 (あ・え・お) ──────────────────
+  if (['あ', 'え', 'お'].includes(target) && s.length >= 2) {
+    // 전체 획의 평균 width / 평균 height 비율로 자형 가로세로 근사
+    const avgW = s.reduce((acc, st) => acc + (st.width  || 0), 0) / s.length;
+    const avgH = s.reduce((acc, st) => acc + (st.height || 0), 0) / s.length;
+    const ratio = avgH > 0.01 ? avgW / avgH : 1;
+
+    // 정상 범위: 0.67 ~ 1.5 (세로가 가로의 1.5배 이내, 가로가 세로의 1.5배 이내)
+    result.aspectRatioFail = (ratio < 0.5 || ratio > 2.0);
+
+    if (result.aspectRatioFail && result.shapeCapScore === null) {
+      result.shapeCapScore = 22;
+      console.log(`Aspect Ratio 왜곡 — ratio: ${ratio.toFixed(2)} → 형태정확성 상한 22`);
+    }
+  }
+
+  return result;
+}
+
+
 function getCharacterCriticalPoints(target) {
   const table = {
 
@@ -452,6 +520,23 @@ async function handler(req, res) {
       if (calculatedStroke !== null) {
         console.log(`필순 덮어쓰기: AI ${parsed.필순} → 계산값 ${calculatedStroke}`);
         parsed.필순 = calculatedStroke;
+      }
+
+      // ─ Step B2: 기하학 게이트 (strokeMeta 좌표 직접 계산) ──
+      // AI 판단을 신뢰하지 않고, 좌표 데이터로 루프/돌출/비율을 직접 판별
+      const geo = analyzeStrokeGeometry(trimmedTarget, strokeMeta);
+
+      // 형태정확성 상한 적용 (구조 게이트 FAIL 또는 Aspect Ratio 왜곡)
+      if (geo.shapeCapScore !== null && parsed.형태정확성 > geo.shapeCapScore) {
+        console.log(`기하학 게이트 — 형태정확성 ${parsed.형태정확성} → 상한 ${geo.shapeCapScore} 강제 적용`);
+        parsed.형태정확성 = geo.shapeCapScore;
+      }
+
+      // 왼쪽 돌출 없음 → 균형비율 -2점 (최소 3점)
+      if (geo.hasLeftProtrusion === false) {
+        const before = parsed.균형비율;
+        parsed.균형비율 = Math.max(3, parsed.균형비율 - 2);
+        console.log(`왼쪽 돌출 없음 → 균형비율 ${before} → ${parsed.균형비율}`);
       }
 
       // ─ Step C: 구조 붕괴 감지 ─────────────────────────────
