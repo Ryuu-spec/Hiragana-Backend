@@ -237,12 +237,12 @@ function generateOverlayHints(target, strokeMeta, geo) {
       const { P5, P6, P7 } = an;
       const [s1, s2] = s;
       const crossX = s2.startX;
-      const crossY = s1.startY + (s1.endY - s1.startY) * 0.45;
+      const crossY = s2.startY; // s2 시작점 = 실제 교차 위치
       const d = Math.sqrt(Math.pow(P5[0]-crossX,2)+Math.pow(P5[1]-crossY,2));
       if (d > 0.20) {
         hints.push({type:'problem', x:P5[0], y:P5[1], label:'원 시작점이 너무 멀어요'});
-        hints.push({type:'target', x:crossX+0.04, y:crossY-0.04, label:'여기서 시작'});
-        hints.push({type:'arrow', fromX:P5[0], fromY:P5[1], toX:crossX+0.04, toY:crossY-0.04});
+        hints.push({type:'target', x:crossX+0.03, y:crossY+0.06, label:'여기서 시작'});
+        hints.push({type:'arrow', fromX:P5[0], fromY:P5[1], toX:crossX+0.03, toY:crossY+0.06});
       }
       if (geo.hasLeftProtrusion === false)
         hints.push({type:'arrow_left', fromX:P6[0], fromY:P6[1], toX:Math.max(0,P6[0]-0.14), toY:P6[1], label:'왼쪽으로 더 뻗어요'});
