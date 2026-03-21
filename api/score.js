@@ -519,7 +519,7 @@ async function handler(req, res) {
           }],
           generationConfig: {
             // v2.0: 벡터·기점 분석 중심이므로 사고량 절감 → 응답 속도 향상
-            thinkingConfig: { thinkingBudget: 1024 }
+            thinkingConfig: { thinkingBudget: 0 }
           }
         })
       }
