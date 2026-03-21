@@ -102,13 +102,12 @@ function buildFewShotPrompt(target) {
   const data = FEWSHOT_DB[target];
   if (!data) return "";
   return `
-## ${target} 채점 기준 예시 (5단계 닻 — 한국 성취도 등급 기준)
-[A등급 90점↑]  ${data.s90.description} → 점수: ${JSON.stringify(data.s90.scores)}
-[B등급 80~89]  ${data.s80.description} → 점수: ${JSON.stringify(data.s80.scores)}
-[C등급 70~79]  ${data.s70.description} → 점수: ${JSON.stringify(data.s70.scores)}
-[D등급 60~69]  ${data.s60.description} → 점수: ${JSON.stringify(data.s60.scores)}
-[E등급 60미만] ${data.s50 ? data.s50.description : '글자 식별 어렵거나 구조 붕괴.'} → 점수: ${JSON.stringify(data.s50 ? data.s50.scores : {})}
-위 5단계를 기준 닻(anchor)으로 삼아, 제출된 이미지가 어느 단계에 가까운지 상대적으로 판단하세요.
+## ${target} 채점 기준 예시 (4단계 닻 — 등급 기준과 일치)
+[90점 - 완벽(A등급)]          ${data.s90.description} → 점수: ${JSON.stringify(data.s90.scores)}
+[80점 - 양호(B등급 기준)]     ${data.s80.description} → 점수: ${JSON.stringify(data.s80.scores)}
+[70점 - 보통(C등급 기준)]     ${data.s70.description} → 점수: ${JSON.stringify(data.s70.scores)}
+[60점 - 노력필요(D등급 기준)] ${data.s60.description} → 점수: ${JSON.stringify(data.s60.scores)}
+위 4단계를 기준 닻(anchor)으로 삼아, 제출된 이미지가 어느 단계에 가까운지 상대적으로 판단하세요.
 `;
 }
 
@@ -124,12 +123,12 @@ ${fewShotSection}
 ## 채점 가이드라인 (반드시 준수)
 - 대상: 한국 중고등학생 초학습자. 학습 동기를 위해 관대하게 평가하세요.
 - 글자가 '${target}'로 인식 가능하면 → 형태정확성 최소 23점 이상
-- 주요 구성 획이 2개 이상 존재하고 글자가 식별 가능하면 → 총점 최소 60점 이상 부여
+- 주요 구성 획이 2개 이상 존재하고 글자가 식별 가능하면 → 총점 최소 55점 이상 부여
 - 기본 형태가 대체로 맞고 주요 획이 표현되었다면 → 총점 70점 이상
 - 형태가 잘 잡혀 있고 흐름이 자연스럽다면 → 총점 85점 이상
 - 획순 오류가 있어도 형태가 맞으면 필순 최대 5점만 감점
-- 획방향은 방향이 완전히 반대가 아닌 이상 15점 이상 유지
-- 글자를 전혀 알아볼 수 없는 경우가 아니면 총점 60점 미만 부여 금지
+- 획방향은 방향이 완전히 반대가 아닌 이상 17점 이상 유지 (형태가 인식 가능한 경우 기준)
+- 글자를 전혀 알아볼 수 없는 경우가 아니면 총점 55점 이하 부여 금지
 - ※ 필순 점수는 시스템이 실제 획 순서 데이터로 자동 계산해 덮어씁니다. 필순 항목은 참고용으로만 채점하고, feedback에서 필순 문제를 주요 개선점으로 언급하지 마세요.
 
 ## 원형·루프 획 평가 기준 (중요)
@@ -305,12 +304,17 @@ async function handler(req, res) {
       }
 
       // ★ 스마트 클램핑 — 획방향 최솟값 보정
-      // 피드백에 실제 역방향(D-02) 언급이 없는데 15 미만이면 AI 실수로 판단해 15로 보정
+      // 피드백에 실제 역방향(D-02) 언급이 없는데 하한 미만이면 AI 실수로 판단해 보정
       // 진짜 D-02 케이스(완전 반대 방향)는 피드백에 반드시 관련 키워드가 등장하므로 오탐 없음
+      //
+      // 하한 기준:
+      //   형태정확성 28점 이상 (글자가 명확히 인식되는 수준) → 하한 17점
+      //   형태정확성 28점 미만 (형태가 불분명한 수준)        → 하한 15점
       const hasRealDirectionError = /반대|역방향|D-02|완전히 반대|거꾸로/.test(parsed.feedback || '');
-      if (parsed.획방향 < 15 && !hasRealDirectionError) {
-        console.log(`획방향 스마트 보정: ${parsed.획방향} → 15 (역방향 언급 없음)`);
-        parsed.획방향 = 15;
+      const directionFloor = parsed.형태정확성 >= 28 ? 17 : 15;
+      if (parsed.획방향 < directionFloor && !hasRealDirectionError) {
+        console.log(`획방향 스마트 보정: ${parsed.획방향} → ${directionFloor} (형태정확성 ${parsed.형태정확성}, 역방향 언급 없음)`);
+        parsed.획방향 = directionFloor;
       }
 
       parsed.score = (parsed.형태정확성 || 0)
@@ -322,7 +326,7 @@ async function handler(req, res) {
       // ★ 방법 B: 글자가 식별 가능한데 55점 미만이면 비율 유지하며 55점으로 올림
       // 단, 형태정확성 20점 미만은 글자 자체를 못 쓴 것으로 보고 보정 미적용
       // 필순은 이미 정확히 계산됐으므로 보정에서 제외
-      const MIN_SCORE = 60;
+      const MIN_SCORE = 55;
       const isRecognizable = parsed.형태정확성 >= 20;
       if (parsed.score > 0 && parsed.score < MIN_SCORE && isRecognizable) {
         const ratio = MIN_SCORE / parsed.score;
@@ -344,14 +348,6 @@ async function handler(req, res) {
     console.log("fetch 실패:", err.message);
     return res.status(500).json({ error: "서버 연결 실패", message: err.message });
   }
-}
-
-function getGrade(score) {
-  if (score >= 90) return 'A';
-  if (score >= 80) return 'B';
-  if (score >= 70) return 'C';
-  if (score >= 60) return 'D';
-  return 'E'; // 60점 미만
 }
 
 module.exports = handler;
