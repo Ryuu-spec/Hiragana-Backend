@@ -212,9 +212,9 @@ function analyzeStrokeGeometry(target, strokeMeta) {
       if (!loopClosed) {
         result.structureGateFail = true;
         result.loopPenalty = 8;
-        console.log(\`お 루프 열림 — 패널티 -8 (ratio: \${loopRatio.toFixed(3)})\`);
+        console.log(`お 루프 열림 — 패널티 -8 (ratio: ${loopRatio.toFixed(3)})`);
       } else {
-        console.log(\`お 루프 닫힘 PASS (ratio: \${loopRatio.toFixed(3)})\`);
+        console.log(`お 루프 닫힘 PASS (ratio: ${loopRatio.toFixed(3)})`);
       }
     }
 
@@ -226,7 +226,7 @@ function analyzeStrokeGeometry(target, strokeMeta) {
       const s3startX  = stroke3.startX;
       if (s3startX < loop2maxX - 0.05) {
         result.loopPenalty = (result.loopPenalty || 0) + 4;
-        console.log(\`お 3획 위치 오류 — 루프 안/왼쪽에 위치 (s3.startX:\${s3startX.toFixed(3)}, loop2.maxX:\${loop2maxX.toFixed(3)})\`);
+        console.log(`お 3획 위치 오류 — 루프 안/왼쪽에 위치 (s3.startX:${s3startX.toFixed(3)}, loop2.maxX:${loop2maxX.toFixed(3)})`);
       }
     }
   }
