@@ -123,12 +123,12 @@ function analyzeStrokeGeometry(target, strokeMeta) {
     const loop = s[2]; // 3획
 
     // [루프 감지] pathLength / displacement 비율
-    // 비율 > 2.0 → 획이 돌아오는 루프 형태 (닫힘)
-    // 비율 ≤ 2.0 → 직선성이 강함 (열림)
+    // 비율 > 1.6 → 획이 돌아오는 루프 형태 (닫힘)
+    // 비율 ≤ 1.6 → 직선성이 강함 (열림)
     const loopRatio = (loop.displacement > 0.01)
       ? loop.pathLength / loop.displacement
       : 999; // displacement=0 이면 제자리 루프 → 닫힘으로 처리
-    const loopClosed = loopRatio > 2.0;
+    const loopClosed = loopRatio > 1.6;
 
     if (!loopClosed) {
       // 1단계 구조 게이트 FAIL → 형태정확성 상한 22점
@@ -137,13 +137,19 @@ function analyzeStrokeGeometry(target, strokeMeta) {
       console.log(`あ 구조 게이트 FAIL — 루프 열림 (ratio: ${loopRatio.toFixed(2)}) → 형태정확성 상한 22`);
     }
 
-    // [왼쪽 돌출 감지]
-    // 3획의 width가 전체 글자폭 평균의 40% 이상이면 돌출 있음으로 판정
-    const avgWidth = s.reduce((acc, st) => acc + (st.width || 0), 0) / s.length;
-    result.hasLeftProtrusion = avgWidth > 0
-      ? (loop.width || 0) > avgWidth * 0.4
-      : null;
-    console.log(`あ 왼쪽 돌출: ${result.hasLeftProtrusion} (loop.width: ${(loop.width||0).toFixed(3)}, avg: ${avgWidth.toFixed(3)})`);
+    // [왼쪽 돌출 감지] — minX 직접 비교 (v2.4 개선)
+    // 3획의 최좌측 x가 2획의 최좌측 x보다 왼쪽이면 돌출 있음
+    const stroke2 = s[1];
+    if (loop.minX !== undefined && stroke2.minX !== undefined) {
+      // 글자폭의 5% 이상 왼쪽으로 나가야 유효한 돌출로 인정
+      result.hasLeftProtrusion = loop.minX < (stroke2.minX - 0.05);
+      console.log(`あ 왼쪽 돌출: ${result.hasLeftProtrusion} (loop.minX: ${loop.minX.toFixed(3)}, stroke2.minX: ${stroke2.minX.toFixed(3)})`);
+    } else {
+      // minX 없으면 구버전 width 방식으로 fallback
+      const avgWidth = s.reduce((acc, st) => acc + (st.width || 0), 0) / s.length;
+      result.hasLeftProtrusion = avgWidth > 0 ? (loop.width || 0) > avgWidth * 0.4 : null;
+      console.log(`あ 왼쪽 돌출 (fallback width): ${result.hasLeftProtrusion}`);
+    }
   }
 
   // ── Group A Aspect Ratio 검사 (あ・え・お) ──────────────────
