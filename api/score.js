@@ -3,6 +3,8 @@ const { FEWSHOT_DB, getFilteredNEG } = require('../fewshot_db');
 
 // ① 필순 (25점 만점)
 const STROKE_RULES = {
+
+  // あ (3획): 가로획→세로획→루프
   'あ': { expected: 3, orderCheck: (s) => {
     function classify(st) {
       if (st.displacement > 0.01 && st.pathLength / st.displacement > 2.5) return 3;
@@ -16,10 +18,29 @@ const STROKE_RULES = {
     if (types.includes(0)) return null;
     return types[0]===1 && types[1]===2 && types[2]===3;
   }},
-  'い': { expected:2, orderCheck:(s)=> s[0].startX < s[1].startX },
-  'う': { expected:2, orderCheck:(s)=> s[0].startY < s[1].startY },
-  'え': { expected:2, orderCheck:(s)=> s[0].startY < s[1].startY },
-  'お': { expected:3, orderCheck:(s)=> s[0].startY < s[1].startY && s[2].startX > 0.4 },
+
+  // い (2획): 왼쪽 획이 먼저 (startX 기준)
+  'い': { expected: 2, orderCheck: (s) => s[0].startX < s[1].startX },
+
+  // う (2획): 위쪽 짧은 사선이 먼저 (startY 기준)
+  'う': { expected: 2, orderCheck: (s) => s[0].startY < s[1].startY },
+
+  // え (2획): 위쪽 짧은 사선이 먼저 (startY 기준)
+  'え': { expected: 2, orderCheck: (s) => s[0].startY < s[1].startY },
+
+  // お (3획): 가로획→루프→오른쪽 사선
+  // 개선: s[2].startX > 0.4 절대값 기준 폐기
+  //       → 3획이 2획보다 오른쪽·위쪽에서 시작하는지로 판단
+  'お': { expected: 3, orderCheck: (s) => {
+    // 1획(가로)이 가장 위에서 시작
+    const firstIsTop   = s[0].startY < s[1].startY;
+    // 3획(사선)이 2획(루프)보다 오른쪽에서 시작
+    const thirdIsRight = s[2].startX > s[1].startX - 0.05; // ±5% 허용
+    // 3획이 2획보다 위쪽에서 시작 (사선은 루프 위 오른쪽)
+    const thirdIsUpper = s[2].startY < (s[1].startY + s[1].height * 0.6);
+    console.log(`お 필순: firstIsTop=${firstIsTop} thirdIsRight=${thirdIsRight} thirdIsUpper=${thirdIsUpper}`);
+    return firstIsTop && thirdIsRight && thirdIsUpper;
+  }},
 };
 
 function calculateStrokeScore(target, strokeMeta) {
@@ -134,11 +155,14 @@ function analyzeStrokeGeometry(target, strokeMeta) {
   if (target==='お' && s.length===3) {
     const loop = s[1];
     const dir  = loop.direction || calcLoopDirection(loop.points);
-    if (dir==='cw') result.loopPenalty = Math.min(8, result.loopPenalty+4);
+    // 방향 오류: cw이면 +3pt (あ와 동일하게 완화)
+    if (dir==='cw') result.loopPenalty = Math.min(7, result.loopPenalty+3);
+    // 닫힘 3단계 (あ와 동일한 기준 적용)
     const ratio2 = loop.pathLength>0.01
       ? ptDist([loop.startX,loop.startY],[loop.endX,loop.endY])/loop.pathLength : 1;
-    if      (ratio2 >= 0.65) result.loopPenalty = Math.min(8, result.loopPenalty+5);
-    else if (ratio2 >= 0.45) result.loopPenalty = Math.min(8, result.loopPenalty+2);
+    if      (ratio2 < 0.45) { /* OK */ }
+    else if (ratio2 < 0.65) result.loopPenalty = Math.min(7, result.loopPenalty+3);
+    else                    result.loopPenalty = Math.min(7, result.loopPenalty+5);
     console.log(`お 루프: dir=${dir} ratio=${ratio2.toFixed(3)} pen=${result.loopPenalty}`);
   }
 
