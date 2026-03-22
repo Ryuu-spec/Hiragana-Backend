@@ -184,9 +184,9 @@ function calculateGridScore(strokeMeta) {
   const dY = Math.abs((arr.charCenterY || 0.5) - 0.5);
   const d  = Math.sqrt(dX * dX + dY * dY);
   let centerScore;
-  if      (d < 0.15) centerScore = 5;   // ±15% 이내
-  else if (d < 0.25) centerScore = 3;   // ±15~25%: -2pt
-  else               centerScore = 0;   // ±25% 초과: -5pt
+  if      (d < 0.25) centerScore = 5;   // ±25% 이내: 만점
+  else if (d < 0.35) centerScore = 3;   // ±25~35%: -2pt
+  else               centerScore = 0;   // ±35% 초과: -5pt
   console.log(`그리드 중심편차: ${d.toFixed(3)} → ${centerScore}pt`);
 
   const total = Math.min(10, sizeScore + centerScore);
