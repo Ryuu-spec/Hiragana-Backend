@@ -1,15 +1,33 @@
-// score.js  v3.0 — 4루브릭 / 루프방향 스트로크계산 / 루프관대화 / 배열계산
+// score.js  v4.0 — 루브릭 v1.0 기준
+// ┌─────────────────────────────────────────────────┐
+// │  영역          배점  담당                        │
+// │  자형          50pt  Gemini 2.5 Flash (이미지)   │
+// │  필순          25pt  태블릿 시간·순서 데이터      │
+// │  길이·비율     15pt  태블릿 좌표 데이터           │
+// │  그리드 배치   10pt  태블릿 바운딩박스 데이터     │
+// └─────────────────────────────────────────────────┘
 const { FEWSHOT_DB, getFilteredNEG } = require('../fewshot_db');
 
-// ① 필순 (25점 만점)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ① 필순 (25점 만점) — 루브릭 §6
+//    태블릿이 시간순으로 넘겨준 strokes 배열을 그대로 사용
+//    (strokes[0]이 첫 번째 그은 획, strokes[n-1]이 마지막 획)
+//
+//    TYPE A 순서역전(가장 심각): 2획-10pt / 3획-7pt / 4획-5pt
+//    TYPE B 인접교환(n↔n+1):   2획 TYPE A 처리 / 3획-5pt / 4획-4pt
+//    TYPE C 방향역행(획 내):    1획-4pt / 2획-3pt / 3획-2pt / 4획-2pt
+//    TYPE D 분리·합치기:        1획-2pt / 2획-2pt / 3획-1pt / 4획-1pt
+//    최저 0점, 최고 25점
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 const STROKE_RULES = {
 
   // あ (3획): 가로획→세로획→루프
   'あ': { expected: 3, orderCheck: (s) => {
     function classify(st) {
-      if (st.displacement > 0.01 && st.pathLength / st.displacement > 2.5) return 3;
-      if (st.width > st.height * 1.5) return 1;
-      if (st.height > st.width * 1.2) return 2;
+      if (st.displacement > 0.01 && st.pathLength / st.displacement > 2.5) return 3; // 루프
+      if (st.width > st.height * 1.5) return 1;  // 가로획
+      if (st.height > st.width * 1.2) return 2;  // 세로획
       return 0;
     }
     if (s.length !== 3) return false;
@@ -19,167 +37,235 @@ const STROKE_RULES = {
     return types[0]===1 && types[1]===2 && types[2]===3;
   }},
 
-  // い (2획): 왼쪽 획이 먼저 (startX 기준)
+  // い (2획): 왼쪽 획이 먼저 — 시간순 배열에서 s[0]이 더 왼쪽이어야 함
   'い': { expected: 2, orderCheck: (s) => s[0].startX < s[1].startX },
 
-  // う (2획): 위쪽 짧은 사선이 먼저 (startY 기준)
+  // う (2획): 위쪽 짧은 사선이 먼저
   'う': { expected: 2, orderCheck: (s) => s[0].startY < s[1].startY },
 
-  // え (2획): 위쪽 짧은 사선이 먼저 (startY 기준)
+  // え (2획): 위쪽 짧은 사선이 먼저
   'え': { expected: 2, orderCheck: (s) => s[0].startY < s[1].startY },
 
   // お (3획): 가로획→루프→오른쪽 사선
-  // 개선: s[2].startX > 0.4 절대값 기준 폐기
-  //       → 3획이 2획보다 오른쪽·위쪽에서 시작하는지로 판단
   'お': { expected: 3, orderCheck: (s) => {
-    // 1획(가로)이 가장 위에서 시작
     const firstIsTop   = s[0].startY < s[1].startY;
-    // 3획(사선)이 2획(루프)보다 오른쪽에서 시작
-    const thirdIsRight = s[2].startX > s[1].startX - 0.05; // ±5% 허용
-    // 3획이 2획보다 위쪽에서 시작 (사선은 루프 위 오른쪽)
+    const thirdIsRight = s[2].startX > s[1].startX - 0.05;
     const thirdIsUpper = s[2].startY < (s[1].startY + s[1].height * 0.6);
     console.log(`お 필순: firstIsTop=${firstIsTop} thirdIsRight=${thirdIsRight} thirdIsUpper=${thirdIsUpper}`);
     return firstIsTop && thirdIsRight && thirdIsUpper;
   }},
 };
 
+// TYPE A 획수별 감점
+const TYPE_A_PENALTY = { 1: 0, 2: 10, 3: 7, 4: 5 };
+
 function calculateStrokeScore(target, strokeMeta) {
   const rule = STROKE_RULES[target];
   if (!rule || !Array.isArray(strokeMeta?.strokes) || !strokeMeta.strokes.length) return null;
-  const diff = Math.abs((strokeMeta.count||0) - rule.expected);
-  if (diff >= 2) return 5;
-  if (diff === 1) return 10;
+
+  const n    = rule.expected;
+  const diff = Math.abs((strokeMeta.count || 0) - n);
+
+  // 획수 차이: TYPE A 수준 감점
+  if (diff >= 2) return Math.max(0, 25 - (TYPE_A_PENALTY[n] || 5) * 2);
+  if (diff === 1) return Math.max(0, 25 - (TYPE_A_PENALTY[n] || 5));
+
+  // 획수 일치: 순서 검증
   try {
     const r = rule.orderCheck(strokeMeta.strokes);
-    if (r === null) return null;
-    return r ? 25 : 15;
+    if (r === null) return null;   // 판별 불가 → 호출부에서 기본값 처리
+    return r ? 25 : Math.max(0, 25 - (TYPE_A_PENALTY[n] || 7));
   } catch(e) { return 17; }
 }
 
-// ② 쇼엘레이스 공식 — 루프 방향 계산
-// 스크린 좌표(y↓): 음수=CCW(반시계)=あ·お의 올바른 방향
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ② 길이·비율 채점 (15점 만점) — 루브릭 §7
+//    획 간 상대적 길이 비율 계산 (절대 길이는 그리드에서 처리)
+//    ±20% 이내: 0감점(15pt) / ±20~35%: -5pt / ±35% 초과: -10pt
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// 획 간 기준 길이 비율 (첫 획 기준 정규화)
+// い: 1획 > 2획이 정상 / 역전 시 り 혼동 오류 (루브릭 §5-1)
+const RATIO_NORMS = {
+  'あ': [1.0, 1.2, 2.0],
+  'い': [1.2, 1.0],
+  'う': [0.5, 1.0],
+  'え': [0.6, 1.0],
+  'お': [1.0, 1.8, 0.5],
+};
+
+function calculateProportionScore(target, strokeMeta) {
+  const norm = RATIO_NORMS[target];
+  const s    = strokeMeta?.strokes;
+  if (!norm || !Array.isArray(s) || s.length < 2) {
+    console.log(`길이비율: ${target} 데이터 부족 → 기본값 10`);
+    return 10;
+  }
+  if (s.length !== norm.length) {
+    console.log(`길이비율: 획수 불일치(${s.length}/${norm.length}) → 기본값 8`);
+    return 8;
+  }
+
+  // pathLength 우선, 없으면 대각선 길이로 추정
+  const lengths = s.map(st =>
+    st.pathLength > 0.01 ? st.pathLength
+      : Math.sqrt((st.width || 0.01) ** 2 + (st.height || 0.01) ** 2)
+  );
+
+  // い 비율 역전: り 혼동 → 0점 (1단계 혼동 판정은 핸들러에서 별도 처리)
+  if (target === 'い' && lengths[1] > lengths[0] * 1.15) {
+    console.log(`い 비율역전(り 혼동 가능성) → 길이비율 0pt`);
+    return 0;
+  }
+
+  // 첫 획 기준 상대 비율 → 기준값 대비 편차 평균
+  const base    = lengths[0] || 0.01;
+  const actual  = lengths.map(l => l / base);
+  const normRel = norm.map(v => v / norm[0]);
+
+  let totalDev = 0;
+  for (let i = 1; i < actual.length; i++) {
+    totalDev += Math.abs(actual[i] - normRel[i]) / (normRel[i] || 1);
+  }
+  const avgDev = totalDev / (actual.length - 1);
+
+  let score;
+  if      (avgDev <= 0.20) score = 15;   // ±20% 이내
+  else if (avgDev <= 0.35) score = 10;   // ±20~35%: -5pt
+  else                     score = 5;    // ±35% 초과: -10pt
+
+  console.log(`길이비율: ${target} avgDev=${avgDev.toFixed(3)} → ${score}pt`);
+  return score;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ③ 그리드 배치 채점 (10점 만점) — 루브릭 §8
+//    크기비율(5pt): 칸의 60~90%
+//    중심배치(5pt): 글자별 표준 중심점 ±15% 이내
+//    ※ v1 중심점 기준: 칸 정중앙(0.5,0.5) 사용
+//       추후 46자 표준 중심점 DB로 교체 예정
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function calculateGridScore(strokeMeta) {
+  const arr = strokeMeta?.arrangement;
+  if (!arr) { console.log('그리드 데이터 없음 → 기본값 6'); return 6; }
+
+  // 크기비율 (5pt)
+  const size = Math.max(arr.charWidth || 0, arr.charHeight || 0);
+  let sizeScore;
+  if      (size >= 0.60 && size <= 0.90) sizeScore = 5;   // 적정
+  else if (size >= 0.50 && size <= 1.00) sizeScore = 3;   // -2pt
+  else                                   sizeScore = 0;   // -5pt
+  console.log(`그리드 크기: ${size.toFixed(2)} → ${sizeScore}pt`);
+
+  // 중심배치 (5pt)
+  const dX = Math.abs((arr.charCenterX || 0.5) - 0.5);
+  const dY = Math.abs((arr.charCenterY || 0.5) - 0.5);
+  const d  = Math.sqrt(dX * dX + dY * dY);
+  let centerScore;
+  if      (d < 0.15) centerScore = 5;   // ±15% 이내
+  else if (d < 0.25) centerScore = 3;   // ±15~25%: -2pt
+  else               centerScore = 0;   // ±25% 초과: -5pt
+  console.log(`그리드 중심편차: ${d.toFixed(3)} → ${centerScore}pt`);
+
+  const total = Math.min(10, sizeScore + centerScore);
+  console.log(`그리드 배치 합계: ${total}pt`);
+  return total;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ④ 쇼엘레이스 공식 — 루프 방향 계산
+//    스크린 좌표(y↓): 음수=CCW(반시계)=あ·お의 올바른 방향
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function calcLoopDirection(points) {
   if (!points || points.length < 3) return null;
   let area = 0;
-  for (let i=0; i<points.length; i++) {
-    const j = (i+1) % points.length;
-    area += points[i][0]*points[j][1] - points[j][0]*points[i][1];
+  for (let i = 0; i < points.length; i++) {
+    const j = (i + 1) % points.length;
+    area += points[i][0] * points[j][1] - points[j][0] * points[i][1];
   }
   if (Math.abs(area) < 0.005) return null;
   return area < 0 ? 'ccw' : 'cw';
 }
 
-// ③ 배열 채점 (田字格 기준, 20점)
-function calculateArrangement(strokeMeta) {
-  const arr = strokeMeta?.arrangement;
-  if (!arr) { console.log('배열 데이터 없음 → 기본값 12'); return 12; }
-  let score = 0;
-  // 크기 (8pt): 격자의 60~85%
-  const size = Math.max(arr.charWidth||0, arr.charHeight||0);
-  if      (size >= 0.60 && size <= 0.85) score += 8;
-  else if (size >= 0.45 && size <  0.60) score += 5;
-  else if (size >  0.85 && size <= 0.93) score += 5;
-  else if (size >= 0.30)                 score += 3;
-  else                                   score += 1;
-  // 중앙 정렬 (7pt)
-  const dX = Math.abs((arr.charCenterX||0.5)-0.5);
-  const dY = Math.abs((arr.charCenterY||0.5)-0.5);
-  const d  = Math.sqrt(dX*dX + dY*dY);
-  if      (d < 0.08) score += 7;
-  else if (d < 0.15) score += 5;
-  else if (d < 0.22) score += 3;
-  else               score += 1;
-  // 기울기 추정 (5pt)
-  const ratio = (arr.charHeight||0)>0.01 ? (arr.charWidth||0)/(arr.charHeight||1) : 1;
-  if      (ratio >= 0.55 && ratio <= 1.60) score += 5;
-  else if (ratio >= 0.40 || ratio <= 2.00) score += 3;
-  else                                     score += 1;
-  const total = Math.min(20, Math.max(0, score));
-  console.log(`배열: 크기${size.toFixed(2)} 중심편차${d.toFixed(2)} 비율${ratio.toFixed(2)} → ${total}pt`);
-  return total;
-}
-
-// ④ 앵커 포인트
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ⑤ 앵커 포인트
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function extractAnchors(target, strokeMeta) {
   const s = strokeMeta?.strokes;
   if (!Array.isArray(s)) return null;
-  if (target==='あ' && s.length===3) {
-    const [s1,s2,s3] = s;
+  if (target === 'あ' && s.length === 3) {
+    const [s1, s2, s3] = s;
     const minXPt = (st) => st.points?.length
-      ? st.points.reduce((m,p)=>p[0]<m[0]?p:m)
-      : [st.minX??st.startX, st.minY??st.startY];
+      ? st.points.reduce((m, p) => p[0] < m[0] ? p : m)
+      : [st.minX ?? st.startX, st.minY ?? st.startY];
     return {
-      P5:[s3.startX,s3.startY], P6:minXPt(s3), P7:[s3.endX,s3.endY],
-      s1minX: s1.minX??s1.startX, s2minX: s2.minX??s2.startX
+      P5: [s3.startX, s3.startY], P6: minXPt(s3), P7: [s3.endX, s3.endY],
+      s1minX: s1.minX ?? s1.startX, s2minX: s2.minX ?? s2.startX
     };
   }
   return null;
 }
 
-function ptDist(a,b){ return Math.sqrt((b[0]-a[0])**2+(b[1]-a[1])**2); }
+function ptDist(a, b) { return Math.sqrt((b[0]-a[0])**2 + (b[1]-a[1])**2); }
 
-// ⑤ 기하학 분석 (루프 3단계 + 방향 스트로크 계산)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ⑥ 기하학 분석 — 자형 패널티 계산 (루브릭 §4)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function analyzeStrokeGeometry(target, strokeMeta) {
-  const result = { loopPenalty:0, aspectPenalty:0, hasLeftProtrusion:null };
+  const result = { loopPenalty: 0, aspectPenalty: 0, hasLeftProtrusion: null };
   const s = strokeMeta?.strokes;
   if (!Array.isArray(s) || !s.length) return result;
 
-  // あ
-  if (target==='あ' && s.length===3) {
+  if (target === 'あ' && s.length === 3) {
     const an = extractAnchors('あ', strokeMeta);
     if (an) {
-      const {P5,P6,P7} = an;
+      const { P5, P6, P7 } = an;
       const loop = s[2];
-      // 루프 닫힘 3단계
-      const ratio = loop.pathLength>0.01 ? ptDist(P5,P7)/loop.pathLength : 1;
+      const ratio = loop.pathLength > 0.01 ? ptDist(P5, P7) / loop.pathLength : 1;
       if      (ratio < 0.40) result.loopPenalty = 0;
       else if (ratio < 0.60) result.loopPenalty = 3;
       else if (ratio < 0.80) result.loopPenalty = 5;
       else                   result.loopPenalty = 8;
       console.log(`あ 루프닫힘 ratio:${ratio.toFixed(3)} → -${result.loopPenalty}pt`);
 
-      // 루프 방향 — 스트로크 데이터 직접 계산 ★
       const dir = loop.direction || calcLoopDirection(loop.points);
-      if (dir==='cw') {
+      if (dir === 'cw') {
         result.loopPenalty = Math.min(8, result.loopPenalty + 3);
         console.log(`あ 루프방향 오류 CW → 총패널티 ${result.loopPenalty}pt`);
       } else {
-        console.log(`あ 루프방향 OK: ${dir||'불명'}`);
+        console.log(`あ 루프방향 OK: ${dir || '불명'}`);
       }
-      // 왼쪽 돌출
       result.hasLeftProtrusion = P6[0] < (an.s2minX - 0.05);
     }
   }
 
-  // お 루프
-  if (target==='お' && s.length===3) {
+  if (target === 'お' && s.length === 3) {
     const loop = s[1];
     const dir  = loop.direction || calcLoopDirection(loop.points);
-    // 방향 오류: cw이면 +3pt (あ와 동일하게 완화)
-    if (dir==='cw') result.loopPenalty = Math.min(7, result.loopPenalty+3);
-    // 닫힘 3단계 (あ와 동일한 기준 적용)
-    const ratio2 = loop.pathLength>0.01
-      ? ptDist([loop.startX,loop.startY],[loop.endX,loop.endY])/loop.pathLength : 1;
+    if (dir === 'cw') result.loopPenalty = Math.min(7, result.loopPenalty + 3);
+    const ratio2 = loop.pathLength > 0.01
+      ? ptDist([loop.startX, loop.startY], [loop.endX, loop.endY]) / loop.pathLength : 1;
     if      (ratio2 < 0.45) { /* OK */ }
-    else if (ratio2 < 0.65) result.loopPenalty = Math.min(7, result.loopPenalty+3);
-    else                    result.loopPenalty = Math.min(7, result.loopPenalty+5);
+    else if (ratio2 < 0.65) result.loopPenalty = Math.min(7, result.loopPenalty + 3);
+    else                    result.loopPenalty = Math.min(7, result.loopPenalty + 5);
     console.log(`お 루프: dir=${dir} ratio=${ratio2.toFixed(3)} pen=${result.loopPenalty}`);
   }
 
-  // Aspect Ratio
-  if (['あ','え','お'].includes(target) && s.length>=2) {
-    const avgW = s.reduce((a,st)=>a+(st.width||0),0)/s.length;
-    const avgH = s.reduce((a,st)=>a+(st.height||0),0)/s.length;
-    const r = avgH>0.01 ? avgW/avgH : 1;
+  if (['あ', 'え', 'お'].includes(target) && s.length >= 2) {
+    const avgW = s.reduce((a, st) => a + (st.width || 0), 0) / s.length;
+    const avgH = s.reduce((a, st) => a + (st.height || 0), 0) / s.length;
+    const r = avgH > 0.01 ? avgW / avgH : 1;
     if (r < 0.40 || r > 2.20) {
       result.aspectPenalty = 4;
-      console.log(`AspectRatio 왜곡 -6pt (${r.toFixed(2)})`);
+      console.log(`AspectRatio 왜곡 -4pt (${r.toFixed(2)})`);
     }
   }
   return result;
 }
 
-// ⑥ 글자별 급소
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ⑦ 글자별 급소
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function getCharacterCriticalPoints(target) {
   const T = {
     'あ': `## [あ] 급소\n① 3획 시작점: 1·2획 교차점 바로 오른쪽 위\n② 교차점 통과 + 삼각형 여백 형성\n③ 3획이 2획 왼쪽으로 충분히 돌출하여 루프 형성\n④ 루프: 반시계 방향으로 둥글게 닫히고 왼쪽 아래로 흘림`,
@@ -191,65 +277,69 @@ function getCharacterCriticalPoints(target) {
   return T[target] || `## [${target}] 전체 자형의 비례와 획 방향을 표준과 비교하세요.`;
 }
 
-// ⑦ 퓨샷 (4루브릭 매핑)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ⑧ 퓨샷 (자형 50pt 기준으로 재매핑)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function buildFewShotPrompt(target) {
   const data = FEWSHOT_DB[target];
   if (!data) return '';
-  const map4 = (d) => {
+  const map = (d) => {
     const sc = d.scores;
     return {
-      글자형상: Math.min(45, Math.round((sc.형태정확성||0)/40*28 + (sc.획방향||0)/20*12 + (sc.균형비율||0)/10*5)),
-      필순:   Math.round((sc.필순||0)/20*25),
-      정성:   sc.끝맺음||0
+      자형: Math.min(50, Math.round(
+        (sc.형태정확성||0)/40*32 + (sc.획방향||0)/20*12 + (sc.균형비율||0)/10*6
+      )),
     };
   };
-  return `\n## ${target} 채점 기준 예시\n[A90] ${data.s90.description.slice(0,100)}... → ${JSON.stringify(map4(data.s90))}\n[B80] → ${JSON.stringify(map4(data.s80))}\n[C70] → ${JSON.stringify(map4(data.s70))}\n[D60↓] → ${JSON.stringify(map4(data.s60))}\n위 4단계를 기준 닻으로 삼아 상대 판단하세요.\n`;
+  return `\n## ${target} 채점 기준 예시 (자형만)\n[A] ${data.s90.description.slice(0,100)}... → ${JSON.stringify(map(data.s90))}\n[B] → ${JSON.stringify(map(data.s80))}\n[C] → ${JSON.stringify(map(data.s70))}\n[D↓] → ${JSON.stringify(map(data.s60))}\n위 4단계를 기준 닻으로 삼아 상대 판단하세요.\n`;
 }
 
-// ⑧ 프롬프트 빌더
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ⑨ 프롬프트 빌더 — Gemini용
+//    Gemini 담당: 자형(50pt) + 피드백
+//    필순·길이비율·그리드배치는 태블릿 데이터로 시스템 별도 계산
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function buildPrompt(target) {
   return `당신은 20년 경력의 일본어 교사입니다. 중학교 1학년 초학습자 관점에서, 전문 용어 없이 쉬운 한국어로 개선 방법을 알려주세요.
-히라가나 '${target}'를 이미지로 보고 아래 3개 항목을 채점하세요. (배열은 시스템 별도 계산)
+히라가나 '${target}'를 이미지로 보고 자형 항목만 채점하세요.
+(필순 25점은 태블릿 시간 데이터 / 길이·비율 15점·그리드 배치 10점은 좌표 데이터로 시스템이 별도 계산합니다)
 
 ${buildFewShotPrompt(target)}
 
 ★ 채점 철학: "교과서체를 최대한 닮았고, 정성껏 썼는가?" 85~90점 = 일본 초등 A+
 ★ 가산제: 0점에서 시작, 갖춰진 요소마다 점수를 쌓습니다.
-★ Safe Zone ±20%: 위치 이탈 이 범위 내이면 만점 처리, 피드백 금지.
+★ Safe Zone ±20%: 위치 이탈이 이 범위 내이면 만점 처리, 피드백 금지.
 ★ 루프 방향은 이미지로 판단 금지 — 완성 형태의 구조만 보고 판단하세요.
 
-### ■ 글자형상 (최대 45점)
+### ■ 자형 (최대 50점) — 루브릭 §4
+[그룹별 핵심 채점 기준]
+ 끝처리 그룹(し·つ·い·り 등): 끝 방향·はね 명확성 / 획 간 길이·비율
+ 복합+루프 그룹(あ·お·ぬ 등): 루프 방향 / 교차점 위치 / 획 연결 / 내부 공간
+ 비율·각도 그룹(へ·く·て 등): 획 길이·비율 / 꺾이는 각도 허용 범위
 [1단계 구조 게이트]
- 복합(あ·え·お) 기본33 / FAIL(교차없거나 루프전무)→상한24
- 단순(い·う)   기본30 / FAIL(획 완전겹침)→상한20
- 인식불가 → 0~18점
+ 복합(あ·え·お) 기본35 / FAIL(교차없거나 루프전무)→상한26
+ 단순(い·う)   기본32 / FAIL(획 완전겹침)→상한22
+ 인식불가 → 0~20점
 [2단계 기하학 검증] 감산 최대 -9pt
- Aspect 왜곡(あ·え·お): -6 / 삼각여백없음(あ): -5 / 역방향획: -3~5
-[3단계 미학 가산] 오직 +, 최대 +12pt
- 유려·자연스러움: +8~12 / 다소딱딱: +4~7 / 뭉툭: +0~3
-
-### ■ 필순 (최대 25점)
-Step1 역방향없음:18 / 1개:12 / 2↑:6
-Step2 각도±30°이내:+7 / ±30~60°:+3~5 / ±60↑:+0~2
-★ 완전역방향 아닌 한 18점↑ 유지
-
-### ■ 정성 (최대 10점)
-Step1 형태유지+획존재:7 / 획생략·형태붕괴:3~4
-Step2 끝처리 자연스러움:+2~3 / 약간어색:+1 / 없음:+0
+ Aspect 왜곡(あ·え·お): -4 / 삼각여백없음(あ): -5 / 역방향획: -3~5
+[3단계 미학 가산] 오직 +, 최대 +15pt
+ 유려·자연스러움: +10~15 / 다소딱딱: +5~9 / 뭉툭: +0~4
 
 ${getCharacterCriticalPoints(target)}
 
 ## 오류 패턴
 ${getFilteredNEG(target)}
 
-★ 제한: 글자형상≤45 필순≤25 정성≤10 절대초과금지
+★ 제한: 자형≤50 절대초과금지
 ★ 피드백: 일본어용어(하네·하라이·토메) 절대금지. 꾹눌러끝내기·살짝위로삐치듯·부드럽게빼면서 표현사용.
 
 아래 JSON으로만 응답 (다른 텍스트 절대금지):
-{"글자형상":숫자,"필순":숫자,"정성":숫자,"feedback":"한국어 2~3문장. 잘된점 먼저. [60미만]핵심1가지. [60~79]잘된점+개선1. [80↑]칭찬위주."}`;
+{"자형":숫자,"feedback":"한국어 2~3문장. 잘된점 먼저. [60미만]핵심1가지. [60~79]잘된점+개선1. [80↑]칭찬위주."}`;
 }
 
-// ⑨ 오버레이 힌트 생성
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ⑩ 오버레이 힌트 생성
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function generateOverlayHints(target, strokeMeta, geo) {
   const hints = [];
   const s = strokeMeta?.strokes;
@@ -260,25 +350,21 @@ function generateOverlayHints(target, strokeMeta, geo) {
     if (an) {
       const { P5, P6, P7 } = an;
       const [s1, s2] = s;
-      // 교차점 추정:
-      //   x = s2의 x 위치 (세로획이 가로획을 통과하는 x)
-      //   y = s1의 y 중간값 (가로획이 지나가는 높이)
-      //   → s2.startY는 세로획 맨 위라 너무 높음 → s1 y레벨 사용
       const crossX = s2.startX;
       const crossY = (s1.startY + s1.endY) / 2;
-      const d = Math.sqrt(Math.pow(P5[0]-crossX,2)+Math.pow(P5[1]-crossY,2));
+      const d = Math.sqrt((P5[0]-crossX)**2 + (P5[1]-crossY)**2);
       if (d > 0.20) {
-        hints.push({type:'problem', x:P5[0], y:P5[1], label:'원 시작점이 너무 멀어요'});
-        hints.push({type:'target', x:crossX+0.03, y:crossY+0.06, label:'여기서 시작'});
-        hints.push({type:'arrow', fromX:P5[0], fromY:P5[1], toX:crossX+0.03, toY:crossY+0.06});
+        hints.push({type:'problem',    x:P5[0], y:P5[1], label:'원 시작점이 너무 멀어요'});
+        hints.push({type:'target',     x:crossX+0.03, y:crossY+0.06, label:'여기서 시작'});
+        hints.push({type:'arrow',      fromX:P5[0], fromY:P5[1], toX:crossX+0.03, toY:crossY+0.06});
       }
       if (geo.hasLeftProtrusion === false)
         hints.push({type:'arrow_left', fromX:P6[0], fromY:P6[1], toX:Math.max(0,P6[0]-0.14), toY:P6[1], label:'왼쪽으로 더 뻗어요'});
       if (geo.loopPenalty >= 5)
         hints.push({type:'close_loop', fromX:P7[0], fromY:P7[1], toX:P5[0], toY:P5[1], label:'원을 닫아주세요'});
       if (geo.loopDirWrong) {
-        const cx=(P5[0]+P6[0]+P7[0])/3, cy=(P5[1]+P6[1]+P7[1])/3;
-        hints.push({type:'direction', x:cx, y:cy, label:'반시계 방향으로 그려요'});
+        const cx = (P5[0]+P6[0]+P7[0])/3, cy = (P5[1]+P6[1]+P7[1])/3;
+        hints.push({type:'direction',  x:cx, y:cy, label:'반시계 방향으로 그려요'});
       }
     }
   }
@@ -300,81 +386,90 @@ function generateOverlayHints(target, strokeMeta, geo) {
   return hints;
 }
 
-// ⑩ 핸들러
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ⑪ 핸들러
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Credentials','true');
-  res.setHeader('Access-Control-Allow-Origin','*');
-  res.setHeader('Access-Control-Allow-Methods','GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader('Access-Control-Allow-Headers','X-CSRF-Token,X-Requested-With,Accept,Accept-Version,Content-Length,Content-MD5,Content-Type,Date,X-Api-Version');
-  if (req.method==='OPTIONS') return res.status(200).end();
-  if (req.method!=='POST')    return res.status(405).json({error:'POST만 허용'});
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token,X-Requested-With,Accept,Accept-Version,Content-Length,Content-MD5,Content-Type,Date,X-Api-Version');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST')   return res.status(405).json({error:'POST만 허용'});
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return res.status(500).json({error:'API 키 없음'});
 
-  const {target, imageData, strokeMeta} = req.body||{};
-  if (!target||!imageData) return res.status(400).json({error:'필수 파라미터 누락'});
+  const {target, imageData, strokeMeta} = req.body || {};
+  if (!target || !imageData) return res.status(400).json({error:'필수 파라미터 누락'});
 
-  const trimmed   = target.trim();
-  const b64       = imageData.includes(',') ? imageData.split(',')[1] : imageData;
+  const trimmed = target.trim();
+  const b64     = imageData.includes(',') ? imageData.split(',')[1] : imageData;
   if (b64.length < 100) return res.status(400).json({error:'이미지 데이터 부족'});
 
   try {
+    // Gemini 2.5 Flash — 자형(50pt)만 채점
     const resp = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      { method:'POST', headers:{'Content-Type':'application/json'},
+      { method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-          contents:[{parts:[{text:buildPrompt(trimmed)},{inline_data:{mime_type:'image/jpeg',data:b64}}]}],
-          generationConfig:{thinkingConfig:{thinkingBudget:512}}
+          contents: [{parts: [
+            {text: buildPrompt(trimmed)},
+            {inline_data: {mime_type:'image/jpeg', data:b64}}
+          ]}],
+          generationConfig: {thinkingConfig: {thinkingBudget: 512}}
         })
       }
     );
     const data = await resp.json();
-    if (data.error) return res.status(500).json({error:'Gemini 오류',detail:data.error});
+    if (data.error)            return res.status(500).json({error:'Gemini 오류', detail:data.error});
     if (!data.candidates?.[0]) return res.status(500).json({error:'candidates 없음'});
     const text = data.candidates[0]?.content?.parts?.[0]?.text;
-    if (!text) return res.status(500).json({error:'text 없음'});
+    if (!text)                 return res.status(500).json({error:'text 없음'});
 
     try {
-      const p = JSON.parse(text.replace(/```json|```/g,'').trim());
+      const p = JSON.parse(text.replace(/```json|```/g, '').trim());
 
-      // 클램핑
-      p.글자형상 = Math.min(45,Math.max(0,p.글자형상||0));
-      p.필순     = Math.min(25,Math.max(0,p.필순    ||0));
-      p.정성     = Math.min(10,Math.max(0,p.정성    ||0));
-      console.log(`[${trimmed}] Gemini: 형상${p.글자형상} 필순${p.필순} 정성${p.정성}`);
+      // 자형 클램핑
+      p.자형 = Math.min(50, Math.max(0, p.자형 || 0));
+      console.log(`[${trimmed}] Gemini 자형: ${p.자형}pt`);
 
-      // 필순 덮어쓰기
-      const cs = calculateStrokeScore(trimmed, strokeMeta);
-      if (cs!==null) { console.log(`필순 ${p.필순}→${cs}`); p.필순=cs; }
-
-      // 기하학 패널티
+      // 자형 기하학 패널티 적용 (태블릿 좌표 데이터 기반)
       const geo = analyzeStrokeGeometry(trimmed, strokeMeta);
       const pen = Math.min(7, geo.loopPenalty + geo.aspectPenalty);
-      if (pen>0) { p.글자형상 = Math.max(0,p.글자형상-pen); console.log(`패널티 -${pen}pt → 형상${p.글자형상}`); }
-      if (geo.hasLeftProtrusion===false) { p.글자형상=Math.max(2,p.글자형상-2); console.log('왼돌출없음 -2pt'); }
+      if (pen > 0) { p.자형 = Math.max(0, p.자형 - pen); console.log(`기하학 패널티 -${pen}pt → 자형${p.자형}`); }
+      if (geo.hasLeftProtrusion === false) { p.자형 = Math.max(2, p.자형 - 2); console.log('왼돌출없음 -2pt'); }
 
-      // 배열 계산
-      p.배열 = calculateArrangement(strokeMeta);
+      // 필순 (25pt) — 태블릿 시간·순서 데이터로 계산
+      const cs = calculateStrokeScore(trimmed, strokeMeta);
+      p.필순 = cs !== null ? cs : 18;   // 판별 불가 시 기본값 18pt
+      console.log(`[${trimmed}] 필순: ${p.필순}pt${cs === null ? ' (기본값)' : ''}`);
 
-      // Floor 보정
-      const broken = p.글자형상 < 22 || /완성되지|열려|해독|루프.*(없|열|미완)/.test(p.feedback||'');
-      if (!broken) {
-        if (p.정성<7 && !/끊기|생략|뚝|없음/.test(p.feedback||''))   { p.정성=7;  console.log('정성 floor→7'); }
-        if (p.필순<18 && !/반대|역방향|거꾸로/.test(p.feedback||''))  { p.필순=18; console.log('필순 floor→18'); }
-      }
+      // 길이·비율 (15pt) — 태블릿 좌표 데이터로 계산
+      p.길이비율 = calculateProportionScore(trimmed, strokeMeta);
 
-      p.score = (p.글자형상||0)+(p.필순||0)+(p.배열||0)+(p.정성||0);
-      console.log(`[${trimmed}] 최종 ${p.score}점 (형상${p.글자형상} 필순${p.필순} 배열${p.배열} 정성${p.정성})`);
+      // 그리드 배치 (10pt) — 태블릿 바운딩박스 데이터로 계산
+      p.그리드배치 = calculateGridScore(strokeMeta);
 
-      // 오버레이 힌트 생성
+      // 최종 합산 (루브릭 §3-2)
+      p.score = (p.자형||0) + (p.필순||0) + (p.길이비율||0) + (p.그리드배치||0);
+      console.log(`[${trimmed}] 최종 ${p.score}점 (자형${p.자형} 필순${p.필순} 길이비율${p.길이비율} 그리드배치${p.그리드배치})`);
+
+      // 성취 등급 (루브릭 §2)
+      if      (p.score >= 90) p.grade = 'A';
+      else if (p.score >= 80) p.grade = 'B';
+      else if (p.score >= 70) p.grade = 'C';
+      else if (p.score >= 60) p.grade = 'D';
+      else                    p.grade = 'E';
+
+      // 오버레이 힌트
       p.overlayHints = generateOverlayHints(trimmed, strokeMeta, geo);
       console.log(`오버레이 힌트 ${p.overlayHints.length}개`);
 
       return res.status(200).json(p);
 
     } catch(e) {
-      console.log('JSON 파싱 실패:', text.slice(0,300));
+      console.log('JSON 파싱 실패:', text.slice(0, 300));
       return res.status(500).json({error:'JSON 파싱 실패', raw:text});
     }
   } catch(err) {
@@ -383,4 +478,4 @@ async function handler(req, res) {
 }
 
 module.exports = handler;
-module.exports.config = { api:{ bodyParser:{ sizeLimit:'10mb' } } };
+module.exports.config = { api: { bodyParser: { sizeLimit: '10mb' } } };
