@@ -485,8 +485,8 @@ async function handler(req, res) {
       p.overlayHints = generateOverlayHints(trimmed, strokeMeta, geo);
       console.log(`오버레이 힌트 ${p.overlayHints.length}개`);
 
-      // Supabase 채점 로그 저장 (비동기, 응답에 영향 없음)
-      saveLog({
+      // Supabase 채점 로그 저장 (await — Vercel 서버리스는 응답 전에 완료해야 함)
+      await saveLog({
         character:    trimmed,
         score_total:  p.score,
         score_shape:  p.자형,
@@ -496,7 +496,7 @@ async function handler(req, res) {
         grade:        p.grade,
         gemini_raw:   p.자형,
         feedback:     p.feedback
-      }).catch(() => {});
+      });
 
       return res.status(200).json(p);
 
