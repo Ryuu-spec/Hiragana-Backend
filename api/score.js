@@ -88,7 +88,7 @@ function calculateStrokeScore(target, strokeMeta) {
 // い: 1획 > 2획이 정상 / 역전 시 り 혼동 오류 (루브릭 §5-1)
 // loopIdx: 루프성 획 인덱스(0-based) — 자형에서 이미 처리하므로 비율 계산에서 제외
 const RATIO_NORMS = {
-  'あ': { norm: [1.0, 1.2],  loopIdx: [2] },  // 3획(루프) 제외, 1·2획만 비교
+  'あ': { norm: [1.0, 2.2],  loopIdx: [2] },  // 3획(루프) 제외, 1획(가로):2획(세로)≈1:2.2
   'い': { norm: [1.2, 1.0],  loopIdx: []  },
   'う': { norm: [0.5, 1.0],  loopIdx: []  },
   'え': { norm: [0.6, 1.0],  loopIdx: []  },
@@ -157,12 +157,17 @@ function calculateGridScore(strokeMeta) {
   const arr = strokeMeta?.arrangement;
   if (!arr) { console.log('그리드 데이터 없음 → 기본값 6'); return 6; }
 
-  // 크기비율 (5pt)
+  // 크기비율 (5pt) — 순차 감점
   const size = Math.max(arr.charWidth || 0, arr.charHeight || 0);
   let sizeScore;
   if      (size >= 0.60 && size <= 0.90) sizeScore = 5;   // 적정
-  else if (size >= 0.50 && size <= 1.00) sizeScore = 3;   // -2pt
-  else                                   sizeScore = 0;   // -5pt
+  else if (size >= 0.55 && size <  0.60) sizeScore = 4;   // -1pt
+  else if (size >= 0.50 && size <  0.55) sizeScore = 3;   // -2pt
+  else if (size >= 0.40 && size <  0.50) sizeScore = 2;   // -3pt
+  else if (size >  0.90 && size <= 0.95) sizeScore = 4;   // -1pt
+  else if (size >  0.95 && size <= 1.00) sizeScore = 3;   // -2pt
+  else if (size >  1.00)                 sizeScore = 1;   // -4pt
+  else                                   sizeScore = 0;   // 40% 미만
   console.log(`그리드 크기: ${size.toFixed(2)} → ${sizeScore}pt`);
 
   // 중심배치 (5pt)
