@@ -88,7 +88,7 @@ function calculateStrokeScore(target, strokeMeta) {
 // い: 1획 > 2획이 정상 / 역전 시 り 혼동 오류 (루브릭 §5-1)
 // loopIdx: 루프성 획 인덱스(0-based) — 자형에서 이미 처리하므로 비율 계산에서 제외
 const RATIO_NORMS = {
-  'あ': { norm: [1.0, 2.2],  loopIdx: [2] },  // 3획(루프) 제외, 1획(가로):2획(세로)≈1:2.2
+  'あ': { norm: [1.0, 2.5],  loopIdx: [2] },  // 3획(루프) 제외, 1획(가로):2획(세로)≈1:2.5
   'い': { norm: [1.2, 1.0],  loopIdx: []  },
   'う': { norm: [0.5, 1.0],  loopIdx: []  },
   'え': { norm: [0.6, 1.0],  loopIdx: []  },
