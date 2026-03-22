@@ -86,31 +86,39 @@ function calculateStrokeScore(target, strokeMeta) {
 
 // 획 간 기준 길이 비율 (첫 획 기준 정규화)
 // い: 1획 > 2획이 정상 / 역전 시 り 혼동 오류 (루브릭 §5-1)
+// loopIdx: 루프성 획 인덱스(0-based) — 자형에서 이미 처리하므로 비율 계산에서 제외
 const RATIO_NORMS = {
-  'あ': [1.0, 1.2, 2.0],
-  'い': [1.2, 1.0],
-  'う': [0.5, 1.0],
-  'え': [0.6, 1.0],
-  'お': [1.0, 1.8, 0.5],
+  'あ': { norm: [1.0, 1.2],  loopIdx: [2] },  // 3획(루프) 제외, 1·2획만 비교
+  'い': { norm: [1.2, 1.0],  loopIdx: []  },
+  'う': { norm: [0.5, 1.0],  loopIdx: []  },
+  'え': { norm: [0.6, 1.0],  loopIdx: []  },
+  'お': { norm: [1.0, 0.5],  loopIdx: [1] },  // 2획(루프) 제외, 1·3획만 비교
 };
 
 function calculateProportionScore(target, strokeMeta) {
-  const norm = RATIO_NORMS[target];
-  const s    = strokeMeta?.strokes;
-  if (!norm || !Array.isArray(s) || s.length < 2) {
+  const entry = RATIO_NORMS[target];
+  const s     = strokeMeta?.strokes;
+  if (!entry || !Array.isArray(s) || s.length < 2) {
     console.log(`길이비율: ${target} 데이터 부족 → 기본값 10`);
     return 10;
   }
-  if (s.length !== norm.length) {
-    console.log(`길이비율: 획수 불일치(${s.length}/${norm.length}) → 기본값 8`);
+
+  // 루프 획 제외 — 루프는 자형(Gemini)에서 이미 채점
+  const loopSet  = new Set(entry.loopIdx);
+  const indices  = s.map((_, i) => i).filter(i => !loopSet.has(i));
+  const norm     = entry.norm;
+
+  if (indices.length < 2 || indices.length !== norm.length) {
+    console.log(`길이비율: ${target} 비루프 획수 불일치(${indices.length}/${norm.length}) → 기본값 8`);
     return 8;
   }
 
   // pathLength 우선, 없으면 대각선 길이로 추정
-  const lengths = s.map(st =>
-    st.pathLength > 0.01 ? st.pathLength
-      : Math.sqrt((st.width || 0.01) ** 2 + (st.height || 0.01) ** 2)
-  );
+  const lengths = indices.map(i => {
+    const st = s[i];
+    return st.pathLength > 0.01 ? st.pathLength
+      : Math.sqrt((st.width || 0.01) ** 2 + (st.height || 0.01) ** 2);
+  });
 
   // い 비율 역전: り 혼동 → 0점 (1단계 혼동 판정은 핸들러에서 별도 처리)
   if (target === 'い' && lengths[1] > lengths[0] * 1.15) {
@@ -134,7 +142,7 @@ function calculateProportionScore(target, strokeMeta) {
   else if (avgDev <= 0.35) score = 10;   // ±20~35%: -5pt
   else                     score = 5;    // ±35% 초과: -10pt
 
-  console.log(`길이비율: ${target} avgDev=${avgDev.toFixed(3)} → ${score}pt`);
+  console.log(`길이비율: ${target} 비루프획[${indices.join(',')}] avgDev=${avgDev.toFixed(3)} → ${score}pt`);
   return score;
 }
 
@@ -184,7 +192,7 @@ function calcLoopDirection(points) {
     area += points[i][0] * points[j][1] - points[j][0] * points[i][1];
   }
   if (Math.abs(area) < 0.005) return null;
-  return area < 0 ? 'ccw' : 'cw';
+  return area < 0 ? 'cw' : 'ccw';  // 화면좌표계 Y↓: 부호 반전
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -222,10 +230,9 @@ function analyzeStrokeGeometry(target, strokeMeta) {
       const { P5, P6, P7 } = an;
       const loop = s[2];
       const ratio = loop.pathLength > 0.01 ? ptDist(P5, P7) / loop.pathLength : 1;
-      if      (ratio < 0.40) result.loopPenalty = 0;
-      else if (ratio < 0.60) result.loopPenalty = 3;
-      else if (ratio < 0.80) result.loopPenalty = 5;
-      else                   result.loopPenalty = 8;
+      if      (ratio < 0.60) result.loopPenalty = 0;   // ±허용 범위 완화
+      else if (ratio < 0.80) result.loopPenalty = 3;
+      else                   result.loopPenalty = 5;
       console.log(`あ 루프닫힘 ratio:${ratio.toFixed(3)} → -${result.loopPenalty}pt`);
 
       const dir = loop.direction || calcLoopDirection(loop.points);
@@ -245,9 +252,9 @@ function analyzeStrokeGeometry(target, strokeMeta) {
     if (dir === 'cw') result.loopPenalty = Math.min(7, result.loopPenalty + 3);
     const ratio2 = loop.pathLength > 0.01
       ? ptDist([loop.startX, loop.startY], [loop.endX, loop.endY]) / loop.pathLength : 1;
-    if      (ratio2 < 0.45) { /* OK */ }
-    else if (ratio2 < 0.65) result.loopPenalty = Math.min(7, result.loopPenalty + 3);
-    else                    result.loopPenalty = Math.min(7, result.loopPenalty + 5);
+    if      (ratio2 < 0.60) { /* OK */ }                           // 허용 범위 완화
+    else if (ratio2 < 0.80) result.loopPenalty = Math.min(5, result.loopPenalty + 3);
+    else                    result.loopPenalty = Math.min(5, result.loopPenalty + 5);
     console.log(`お 루프: dir=${dir} ratio=${ratio2.toFixed(3)} pen=${result.loopPenalty}`);
   }
 
