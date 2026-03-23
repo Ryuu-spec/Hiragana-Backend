@@ -345,9 +345,9 @@ function analyzeAh(strokeMeta) {
   console.log(`あ D4 루프방향: ${result.d4_dir} (cw=정상, ccw=반대)`);
 
   // D5: 루프 왼쪽 돌출 — 3획 minX가 2획 minX보다 충분히 왼쪽에 있는지
-  // 전체 글자 폭의 10% 이상 왼쪽으로 나와야 정상
+  // 전체 글자 폭의 15% 이상 왼쪽으로 나와야 정상 (10%는 너무 작아 오판)
   const protrusion = s2.minX - s3.minX;  // 양수 = 왼쪽으로 나온 거리
-  const threshold  = result.charWidth * 0.10;
+  const threshold  = result.charWidth * 0.15;
   result.d5_protrude = protrusion >= threshold ? '정상' : '미돌출';
   console.log(`あ D5 왼쪽돌출: 2획minX=${s2.minX.toFixed(3)} 3획minX=${s3.minX.toFixed(3)} 돌출=${protrusion.toFixed(3)} 기준=${threshold.toFixed(3)} → ${result.d5_protrude}`);
 
