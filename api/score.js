@@ -1,11 +1,13 @@
-// score.js  v4.0 — 루브릭 v1.0 기준
-// ┌─────────────────────────────────────────────────┐
-// │  영역          배점  담당                        │
-// │  자형          50pt  Gemini 2.5 Flash (이미지)   │
-// │  필순          25pt  태블릿 시간·순서 데이터      │
-// │  길이·비율     15pt  태블릿 좌표 데이터           │
-// │  그리드 배치   10pt  태블릿 바운딩박스 데이터     │
-// └─────────────────────────────────────────────────┘
+// score.js  v4.1 — 루브릭 v1.0 기준
+// ┌──────────────────────────────────────────────────────────┐
+// │  영역          배점  담당                                 │
+// │  자형          50pt  Gemini 2.5 Flash (이미지)            │
+// │    ├ 골격      45pt    전체 자형 구조·형태                │
+// │    └ 세부       5pt    끝처리 (Klee One 교과서체 기준)    │
+// │  필순          25pt  태블릿 시간·순서 데이터              │
+// │  길이·비율     15pt  태블릿 좌표 데이터                   │
+// │  그리드 배치   10pt  태블릿 바운딩박스 데이터             │
+// └──────────────────────────────────────────────────────────┘
 const { FEWSHOT_DB, getFilteredNEG } = require('../fewshot_db');
 
 // Supabase 채점 로그 저장
@@ -31,24 +33,14 @@ async function saveLog(data) {
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ① 필순 (25점 만점) — 루브릭 §6
-//    태블릿이 시간순으로 넘겨준 strokes 배열을 그대로 사용
-//    (strokes[0]이 첫 번째 그은 획, strokes[n-1]이 마지막 획)
-//
-//    TYPE A 순서역전(가장 심각): 2획-10pt / 3획-7pt / 4획-5pt
-//    TYPE B 인접교환(n↔n+1):   2획 TYPE A 처리 / 3획-5pt / 4획-4pt
-//    TYPE C 방향역행(획 내):    1획-4pt / 2획-3pt / 3획-2pt / 4획-2pt
-//    TYPE D 분리·합치기:        1획-2pt / 2획-2pt / 3획-1pt / 4획-1pt
-//    최저 0점, 최고 25점
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const STROKE_RULES = {
-
-  // あ (3획): 가로획→세로획→루프
   'あ': { expected: 3, orderCheck: (s) => {
     function classify(st) {
-      if (st.displacement > 0.01 && st.pathLength / st.displacement > 2.5) return 3; // 루프
-      if (st.width > st.height * 1.5) return 1;  // 가로획
-      if (st.height > st.width * 1.2) return 2;  // 세로획
+      if (st.displacement > 0.01 && st.pathLength / st.displacement > 2.5) return 3;
+      if (st.width > st.height * 1.5) return 1;
+      if (st.height > st.width * 1.2) return 2;
       return 0;
     }
     if (s.length !== 3) return false;
@@ -57,17 +49,9 @@ const STROKE_RULES = {
     if (types.includes(0)) return null;
     return types[0]===1 && types[1]===2 && types[2]===3;
   }},
-
-  // い (2획): 왼쪽 획이 먼저 — 시간순 배열에서 s[0]이 더 왼쪽이어야 함
   'い': { expected: 2, orderCheck: (s) => s[0].startX < s[1].startX },
-
-  // う (2획): 위쪽 짧은 사선이 먼저
   'う': { expected: 2, orderCheck: (s) => s[0].startY < s[1].startY },
-
-  // え (2획): 위쪽 짧은 사선이 먼저
   'え': { expected: 2, orderCheck: (s) => s[0].startY < s[1].startY },
-
-  // お (3획): 가로획→루프→오른쪽 사선
   'お': { expected: 3, orderCheck: (s) => {
     const firstIsTop   = s[0].startY < s[1].startY;
     const thirdIsRight = s[2].startX > s[1].startX - 0.05;
@@ -77,7 +61,6 @@ const STROKE_RULES = {
   }},
 };
 
-// TYPE A 획수별 감점
 const TYPE_A_PENALTY = { 1: 0, 2: 10, 3: 7, 4: 5 };
 
 function calculateStrokeScore(target, strokeMeta) {
@@ -87,33 +70,26 @@ function calculateStrokeScore(target, strokeMeta) {
   const n    = rule.expected;
   const diff = Math.abs((strokeMeta.count || 0) - n);
 
-  // 획수 차이: TYPE A 수준 감점
   if (diff >= 2) return Math.max(0, 25 - (TYPE_A_PENALTY[n] || 5) * 2);
   if (diff === 1) return Math.max(0, 25 - (TYPE_A_PENALTY[n] || 5));
 
-  // 획수 일치: 순서 검증
   try {
     const r = rule.orderCheck(strokeMeta.strokes);
-    if (r === null) return null;   // 판별 불가 → 호출부에서 기본값 처리
+    if (r === null) return null;
     return r ? 25 : Math.max(0, 25 - (TYPE_A_PENALTY[n] || 7));
   } catch(e) { return 17; }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ② 길이·비율 채점 (15점 만점) — 루브릭 §7
-//    획 간 상대적 길이 비율 계산 (절대 길이는 그리드에서 처리)
-//    ±20% 이내: 0감점(15pt) / ±20~35%: -5pt / ±35% 초과: -10pt
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-// 획 간 기준 길이 비율 (첫 획 기준 정규화)
-// い: 1획 > 2획이 정상 / 역전 시 り 혼동 오류 (루브릭 §5-1)
-// ※ 루프성 획(あ 3획, お 2획)은 자형에서 이미 처리 → 비율 계산 제외
 const RATIO_NORMS = {
-  'あ': [1.0, 1.2],        // 3획(루프) 제외 → 1·2획만 비교
+  'あ': [1.0, 1.2],
   'い': [1.2, 1.0],
   'う': [0.5, 1.0],
   'え': [0.6, 1.0],
-  'お': [1.0, 0.5],        // 2획(루프) 제외 → 1·3획만 비교
+  'お': [1.0, 0.5],
 };
 
 function calculateProportionScore(target, strokeMeta) {
@@ -128,19 +104,16 @@ function calculateProportionScore(target, strokeMeta) {
     return 8;
   }
 
-  // pathLength 우선, 없으면 대각선 길이로 추정
   const lengths = s.map(st =>
     st.pathLength > 0.01 ? st.pathLength
       : Math.sqrt((st.width || 0.01) ** 2 + (st.height || 0.01) ** 2)
   );
 
-  // い 비율 역전: り 혼동 → 0점 (1단계 혼동 판정은 핸들러에서 별도 처리)
   if (target === 'い' && lengths[1] > lengths[0] * 1.15) {
     console.log(`い 비율역전(り 혼동 가능성) → 길이비율 0pt`);
     return 0;
   }
 
-  // 첫 획 기준 상대 비율 → 기준값 대비 편차 평균
   const base    = lengths[0] || 0.01;
   const actual  = lengths.map(l => l / base);
   const normRel = norm.map(v => v / norm[0]);
@@ -152,9 +125,9 @@ function calculateProportionScore(target, strokeMeta) {
   const avgDev = totalDev / (actual.length - 1);
 
   let score;
-  if      (avgDev <= 0.20) score = 15;   // ±20% 이내
-  else if (avgDev <= 0.35) score = 10;   // ±20~35%: -5pt
-  else                     score = 5;    // ±35% 초과: -10pt
+  if      (avgDev <= 0.20) score = 15;
+  else if (avgDev <= 0.35) score = 10;
+  else                     score = 5;
 
   console.log(`길이비율: ${target} avgDev=${avgDev.toFixed(3)} → ${score}pt`);
   return score;
@@ -162,31 +135,25 @@ function calculateProportionScore(target, strokeMeta) {
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ③ 그리드 배치 채점 (10점 만점) — 루브릭 §8
-//    크기비율(5pt): 칸의 60~90%
-//    중심배치(5pt): 글자별 표준 중심점 ±15% 이내
-//    ※ v1 중심점 기준: 칸 정중앙(0.5,0.5) 사용
-//       추후 46자 표준 중심점 DB로 교체 예정
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function calculateGridScore(strokeMeta) {
   const arr = strokeMeta?.arrangement;
   if (!arr) { console.log('그리드 데이터 없음 → 기본값 6'); return 6; }
 
-  // 크기비율 (5pt)
   const size = Math.max(arr.charWidth || 0, arr.charHeight || 0);
   let sizeScore;
-  if      (size >= 0.60 && size <= 0.90) sizeScore = 5;   // 적정
-  else if (size >= 0.50 && size <= 1.00) sizeScore = 3;   // -2pt
-  else                                   sizeScore = 0;   // -5pt
+  if      (size >= 0.60 && size <= 0.90) sizeScore = 5;
+  else if (size >= 0.50 && size <= 1.00) sizeScore = 3;
+  else                                   sizeScore = 0;
   console.log(`그리드 크기: ${size.toFixed(2)} → ${sizeScore}pt`);
 
-  // 중심배치 (5pt)
   const dX = Math.abs((arr.charCenterX || 0.5) - 0.5);
   const dY = Math.abs((arr.charCenterY || 0.5) - 0.5);
   const d  = Math.sqrt(dX * dX + dY * dY);
   let centerScore;
-  if      (d < 0.25) centerScore = 5;   // ±25% 이내: 만점
-  else if (d < 0.35) centerScore = 3;   // ±25~35%: -2pt
-  else               centerScore = 0;   // ±35% 초과: -5pt
+  if      (d < 0.25) centerScore = 5;
+  else if (d < 0.35) centerScore = 3;
+  else               centerScore = 0;
   console.log(`그리드 중심편차: ${d.toFixed(3)} → ${centerScore}pt`);
 
   const total = Math.min(10, sizeScore + centerScore);
@@ -196,7 +163,6 @@ function calculateGridScore(strokeMeta) {
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ④ 쇼엘레이스 공식 — 루프 방향 계산
-//    스크린 좌표(y↓): 음수=CCW(반시계)=あ·お의 올바른 방향
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function calcLoopDirection(points) {
   if (!points || points.length < 3) return null;
@@ -231,7 +197,7 @@ function extractAnchors(target, strokeMeta) {
 function ptDist(a, b) { return Math.sqrt((b[0]-a[0])**2 + (b[1]-a[1])**2); }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// ⑥ 기하학 분석 — 자형 패널티 계산 (루브릭 §4)
+// ⑥ 기하학 분석 — 자형 패널티 계산
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function analyzeStrokeGeometry(target, strokeMeta) {
   const result = { loopPenalty: 0, aspectPenalty: 0, hasLeftProtrusion: null };
@@ -300,63 +266,96 @@ function getCharacterCriticalPoints(target) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// ⑧ 퓨샷 (자형 50pt 기준으로 재매핑)
+// ⑧ 퓨샷 — 골격(45pt) + 세부(5pt) 기준으로 매핑
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function buildFewShotPrompt(target) {
   const data = FEWSHOT_DB[target];
   if (!data) return '';
+
+  // fewshot_db의 구버전 점수 → 골격/세부로 변환
+  //
+  // 골격(45): 형태정확성(38pt 기중) + 획방향(5pt 기여) + 균형비율(2pt 기여)
+  //   → 이론 최대: 38+5+2 = 45pt
+  //   [fix2] 균형비율 추가 (이전 공식에서 완전 누락되어 있었음)
+  //   [fix2] 형태정확성 가중치 40→38 (균형비율 2pt 공간 확보)
+  //
+  // 세부(5): 끝맺음(5pt) — Math.floor로 B/C 등급 구분 보장
+  //   [fix1] Math.round → Math.floor
+  //   (이전: s80 끝맺음 8pt→4, s70 끝맺음 7pt→4로 동일 → 등급 구분 불가)
+  //   (수정: s80 끝맺음 8pt→4, s70 끝맺음 7pt→3으로 구분)
   const map = (d) => {
     const sc = d.scores;
-    return {
-      자형: Math.min(50, Math.round(
-        (sc.형태정확성||0)/40*32 + (sc.획방향||0)/20*12 + (sc.균형비율||0)/10*6
-      )),
-    };
+    const 골격 = Math.min(45, Math.round(
+      (sc.형태정확성 || 0) / 40 * 38 +
+      (sc.획방향     || 0) / 20 *  5 +
+      (sc.균형비율   || 0) / 10 *  2
+    ));
+    const 세부 = Math.min(5, Math.floor(
+      (sc.끝맺음 || 0) / 10 * 5
+    ));
+    return { 골격, 세부 };
   };
-  return `\n## ${target} 채점 기준 예시 (자형만)\n[A] ${data.s90.description.slice(0,100)}... → ${JSON.stringify(map(data.s90))}\n[B] → ${JSON.stringify(map(data.s80))}\n[C] → ${JSON.stringify(map(data.s70))}\n[D↓] → ${JSON.stringify(map(data.s60))}\n위 4단계를 기준 닻으로 삼아 상대 판단하세요.\n`;
+
+  return `
+## ${target} 채점 기준 예시 (골격+세부)
+[A등급] ${data.s90.description.slice(0, 100)}... → ${JSON.stringify(map(data.s90))}
+[B등급] → ${JSON.stringify(map(data.s80))}
+[C등급] → ${JSON.stringify(map(data.s70))}
+[D등급↓] → ${JSON.stringify(map(data.s60))}
+위 4단계를 기준 닻으로 삼아 상대 판단하세요.
+`;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ⑨ 프롬프트 빌더 — Gemini용
-//    Gemini 담당: 자형(50pt) + 피드백
-//    필순·길이비율·그리드배치는 태블릿 데이터로 시스템 별도 계산
+//    Gemini 담당: 골격(45pt) + 세부(5pt) + 피드백
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function buildPrompt(target) {
   return `당신은 20년 경력의 일본어 교사입니다. 중학교 1학년 초학습자 관점에서, 전문 용어 없이 쉬운 한국어로 개선 방법을 알려주세요.
-히라가나 '${target}'를 이미지로 보고 자형 항목만 채점하세요.
+히라가나 '${target}'를 이미지로 보고 자형 항목(골격 + 세부)만 채점하세요.
 (필순 25점은 태블릿 시간 데이터 / 길이·비율 15점·그리드 배치 10점은 좌표 데이터로 시스템이 별도 계산합니다)
 
 ${buildFewShotPrompt(target)}
 
-★ 채점 철학: "교과서체를 최대한 닮았고, 정성껏 썼는가?" 85~90점 = 일본 초등 A+
+★ 채점 철학: "Klee One 교과서체를 최대한 닮았고, 정성껏 썼는가?" 85~90점 = 일본 초등 A+
 ★ 가산제: 0점에서 시작, 갖춰진 요소마다 점수를 쌓습니다.
 ★ Safe Zone ±20%: 위치 이탈이 이 범위 내이면 만점 처리, 피드백 금지.
 ★ 루프 방향은 이미지로 판단 금지 — 완성 형태의 구조만 보고 판단하세요.
 
-### ■ 자형 (최대 50점) — 루브릭 §4
+### ■ 골격 (최대 45점) — 루브릭 §4
+전체 자형이 목표 히라가나와 얼마나 구조적으로 닮았는가를 채점합니다.
 [그룹별 핵심 채점 기준]
- 끝처리 그룹(し·つ·い·り 등): 끝 방향·はね 명확성 / 획 간 길이·비율
+ 끝처리 그룹(し·つ·い·り 등): 끝 방향 명확성 / 획 간 길이·비율
  복합+루프 그룹(あ·お·ぬ 등): 루프 방향 / 교차점 위치 / 획 연결 / 내부 공간
  비율·각도 그룹(へ·く·て 등): 획 길이·비율 / 꺾이는 각도 허용 범위
 [1단계 구조 게이트]
- 복합(あ·え·お) 기본35 / FAIL(교차없거나 루프전무)→상한26
- 단순(い·う)   기본32 / FAIL(획 완전겹침)→상한22
- 인식불가 → 0~20점
+ 복합(あ·え·お) 기본 31 / FAIL(교차 없거나 루프 전무) → 상한 23
+ 단순(い·う)   기본 29 / FAIL(획 완전 겹침) → 상한 20
+ 인식불가 → 0~18점
 [2단계 기하학 검증] 감산 최대 -9pt
- Aspect 왜곡(あ·え·お): -4 / 삼각여백없음(あ): -5 / 역방향획: -3~5
-[3단계 미학 가산] 오직 +, 최대 +15pt
- 유려·자연스러움: +10~15 / 다소딱딱: +5~9 / 뭉툭: +0~4
+ Aspect 왜곡(あ·え·お): -4 / 삼각여백 없음(あ): -5 / 역방향획: -3~5
+[3단계 미학 가산] 오직 +, 최대 +14pt
+ 유려·자연스러움: +9~14 / 다소 딱딱: +4~8 / 뭉툭: +0~3
+
+### ■ 세부 (최대 5점) — Klee One 교과서체 끝처리 기준
+획의 끝 처리(삐침·꾹 누름·흘림)가 Klee One 교과서체와 얼마나 일치하는가를 채점합니다.
+[채점 기준]
+ 5점: 모든 획의 끝처리가 자연스럽고 교과서체와 일치 (꾹 눌러 끝내기 / 살짝 위로 삐치듯 / 부드럽게 빼면서)
+ 3점: 절반 이상의 획에서 끝처리가 표현됨
+ 1점: 끝처리 시도는 있으나 방향·강도 부정확
+ 0점: 모든 획이 뚝 끊기거나 끝처리 전무
+[주의] 끝처리 방향이 표준과 같으면 세기가 약해도 3점 이상 부여
 
 ${getCharacterCriticalPoints(target)}
 
 ## 오류 패턴
 ${getFilteredNEG(target)}
 
-★ 제한: 자형≤50 절대초과금지
+★ 제한: 골격≤45, 세부≤5 절대 초과 금지
 ★ 피드백: 일본어용어(하네·하라이·토메) 절대금지. 꾹눌러끝내기·살짝위로삐치듯·부드럽게빼면서 표현사용.
 
 아래 JSON으로만 응답 (다른 텍스트 절대금지):
-{"자형":숫자,"feedback":"한국어 2~3문장. 잘된점 먼저. [60미만]핵심1가지. [60~79]잘된점+개선1. [80↑]칭찬위주."}`;
+{"골격":숫자,"세부":숫자,"feedback":"한국어 2~3문장. 잘된점 먼저. [60미만]핵심1가지. [60~79]잘된점+개선1. [80↑]칭찬위주."}`;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -430,7 +429,7 @@ async function handler(req, res) {
   if (b64.length < 100) return res.status(400).json({error:'이미지 데이터 부족'});
 
   try {
-    // Gemini 2.5 Flash — 자형(50pt)만 채점
+    // Gemini 2.5 Flash — 골격(45pt) + 세부(5pt) 채점
     const resp = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       { method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -452,27 +451,29 @@ async function handler(req, res) {
     try {
       const p = JSON.parse(text.replace(/```json|```/g, '').trim());
 
-      // 자형 클램핑
-      p.자형 = Math.min(50, Math.max(0, p.자형 || 0));
-      console.log(`[${trimmed}] Gemini 자형: ${p.자형}pt`);
+      // ── 골격 / 세부 클램핑 ──────────────────────────────
+      p.골격 = Math.min(45, Math.max(0, p.골격 || 0));
+      p.세부 = Math.min(5,  Math.max(0, p.세부  || 0));
+      p.자형 = p.골격 + p.세부;           // 자형 합계 (최대 50pt)
+      console.log(`[${trimmed}] Gemini 골격: ${p.골격}pt  세부: ${p.세부}pt  자형합계: ${p.자형}pt`);
 
-      // 오버레이 힌트용 기하학 분석 (점수 감점 없음 — Gemini가 NEG 기준으로 자형에 반영)
+      // 오버레이 힌트용 기하학 분석
       const geo = analyzeStrokeGeometry(trimmed, strokeMeta);
 
-      // 필순 (25pt) — 태블릿 시간·순서 데이터로 계산
+      // 필순 (25pt)
       const cs = calculateStrokeScore(trimmed, strokeMeta);
-      p.필순 = cs !== null ? cs : 18;   // 판별 불가 시 기본값 18pt
+      p.필순 = cs !== null ? cs : 18;
       console.log(`[${trimmed}] 필순: ${p.필순}pt${cs === null ? ' (기본값)' : ''}`);
 
-      // 길이·비율 (15pt) — 태블릿 좌표 데이터로 계산
+      // 길이·비율 (15pt)
       p.길이비율 = calculateProportionScore(trimmed, strokeMeta);
 
-      // 그리드 배치 (10pt) — 태블릿 바운딩박스 데이터로 계산
+      // 그리드 배치 (10pt)
       p.그리드배치 = calculateGridScore(strokeMeta);
 
-      // 최종 합산 (루브릭 §3-2)
-      p.score = (p.자형||0) + (p.필순||0) + (p.길이비율||0) + (p.그리드배치||0);
-      console.log(`[${trimmed}] 최종 ${p.score}점 (자형${p.자형} 필순${p.필순} 길이비율${p.길이비율} 그리드배치${p.그리드배치})`);
+      // 최종 합산
+      p.score = p.자형 + p.필순 + p.길이비율 + p.그리드배치;
+      console.log(`[${trimmed}] 최종 ${p.score}점 (골격${p.골격} 세부${p.세부} 필순${p.필순} 길이비율${p.길이비율} 그리드배치${p.그리드배치})`);
 
       // 성취 등급 (루브릭 §2)
       if      (p.score >= 90) p.grade = 'A';
@@ -485,17 +486,18 @@ async function handler(req, res) {
       p.overlayHints = generateOverlayHints(trimmed, strokeMeta, geo);
       console.log(`오버레이 힌트 ${p.overlayHints.length}개`);
 
-      // Supabase 채점 로그 저장 (await — Vercel 서버리스는 응답 전에 완료해야 함)
+      // Supabase 로그 (골격/세부 분리 저장)
       await saveLog({
-        character:    trimmed,
-        score_total:  p.score,
-        score_shape:  p.자형,
-        score_stroke: p.필순,
-        score_ratio:  p.길이비율,
-        score_grid:   p.그리드배치,
-        grade:        p.grade,
-        gemini_raw:   p.자형,
-        feedback:     p.feedback
+        character:     trimmed,
+        score_total:   p.score,
+        score_skeleton: p.골격,
+        score_detail:   p.세부,
+        score_shape:   p.자형,
+        score_stroke:  p.필순,
+        score_ratio:   p.길이비율,
+        score_grid:    p.그리드배치,
+        grade:         p.grade,
+        feedback:      p.feedback
       });
 
       return res.status(200).json(p);
