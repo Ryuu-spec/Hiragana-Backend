@@ -266,6 +266,232 @@ function getCharacterCriticalPoints(target) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ◆ あ 전용 새 아키텍처 (v2)
+//   점수 계산 = 코드 (결정론적)
+//   Gemini = YES/NO 질문만 + 피드백 생성만
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ── あ 좌표 분석 → 결함 목록 ──────────────────────────
+// 반환: { d1_loop, d2_cross, d3_closure, d4_dir, charWidth, loopWidth }
+function analyzeAh(strokeMeta) {
+  const s = strokeMeta?.strokes;
+  const result = {
+    d1_loop:    'unknown',  // 루프 크기: '과대'|'적정'|'과소'|'매우과소'
+    d2_cross:   'unknown',  // 교차점:   '정상'|'없음'
+    d3_closure: 'unknown',  // 루프 닫힘: '닫힘'|'약간열림'|'열림'
+    d4_dir:     'unknown',  // 루프 방향: 'ccw'|'cw'|'unknown'
+    charWidth:  0,
+    loopRatio:  0,
+  };
+
+  if (!Array.isArray(s) || s.length !== 3) {
+    console.log(`あ 분석: 획수 ${s?.length ?? 0} → 분석 불가`);
+    return result;
+  }
+
+  const [s1, s2, s3] = s;
+
+  // 전체 글자 폭 (정규화 좌표)
+  const allMinX = Math.min(s1.minX, s2.minX, s3.minX);
+  const allMaxX = Math.max(s1.maxX, s2.maxX, s3.maxX);
+  result.charWidth = allMaxX - allMinX || 0.01;
+
+  // D1: 루프(3획) 크기 비율 = 3획 폭 / 전체 글자 폭
+  result.loopRatio = s3.width / result.charWidth;
+  if      (result.loopRatio > 1.30) result.d1_loop = '과대';
+  else if (result.loopRatio >= 0.50) result.d1_loop = '적정';
+  else if (result.loopRatio >= 0.30) result.d1_loop = '과소';
+  else                               result.d1_loop = '매우과소';
+  console.log(`あ D1 루프비율: ${result.loopRatio.toFixed(3)} → ${result.d1_loop}`);
+
+  // D2: 교차점 — 1획(가로)의 y범위 안에 2획 시작점이 있는지
+  const crossOk = s2.startY >= s1.minY && s2.startY <= s1.maxY;
+  result.d2_cross = crossOk ? '정상' : '없음';
+  console.log(`あ D2 교차점: 1획y(${s1.minY.toFixed(3)}~${s1.maxY.toFixed(3)}) 2획시작y=${s2.startY.toFixed(3)} → ${result.d2_cross}`);
+
+  // D3: 루프 닫힘 — 시작-끝 거리 / 전체 경로 길이
+  const loopDist = Math.sqrt((s3.endX - s3.startX) ** 2 + (s3.endY - s3.startY) ** 2);
+  const closureRatio = s3.pathLength > 0.01 ? loopDist / s3.pathLength : 1;
+  if      (closureRatio < 0.25) result.d3_closure = '닫힘';
+  else if (closureRatio < 0.45) result.d3_closure = '약간열림';
+  else                          result.d3_closure = '열림';
+  console.log(`あ D3 루프닫힘: dist=${loopDist.toFixed(3)} ratio=${closureRatio.toFixed(3)} → ${result.d3_closure}`);
+
+  // D4: 루프 방향 (쇼엘레이스, 이미 있음)
+  const dir = s3.direction || calcLoopDirection(s3.points);
+  result.d4_dir = dir || 'unknown';
+  console.log(`あ D4 루프방향: ${result.d4_dir}`);
+
+  return result;
+}
+
+// ── あ 골격 점수 계산 (결정론적) ────────────────────────
+// defects: analyzeAh() 결과
+// geminiYN: { 끝처리: bool, 삼각여백: bool }
+function calcAhSkeleton(defects, geminiYN) {
+  let score = 43;  // 만점 기준
+  const log = [];
+
+  // D1: 루프 크기
+  if      (defects.d1_loop === '과대')   { score -= 6; log.push('루프 과대 -6'); }
+  else if (defects.d1_loop === '과소')   { score -= 5; log.push('루프 과소 -5'); }
+  else if (defects.d1_loop === '매우과소') { score -= 10; log.push('루프 매우과소 -10'); }
+
+  // D2: 교차점
+  if (defects.d2_cross === '없음') { score -= 13; log.push('교차점 없음 -13'); }
+
+  // D3: 루프 닫힘
+  if      (defects.d3_closure === '약간열림') { score -= 3; log.push('루프 약간열림 -3'); }
+  else if (defects.d3_closure === '열림')     { score -= 8; log.push('루프 열림 -8'); }
+
+  // D4: 루프 방향
+  if (defects.d4_dir === 'cw') { score -= 4; log.push('루프방향 CW -4'); }
+
+  // 삼각여백 (Gemini YES/NO)
+  if (geminiYN?.삼각여백 === false) { score -= 3; log.push('삼각여백 없음 -3'); }
+
+  score = Math.max(0, Math.min(45, score));
+  console.log(`あ 골격 계산: 43 → ${score}pt [${log.join(', ')}]`);
+  return score;
+}
+
+// ── あ 마무리 점수 계산 (Gemini YES/NO 기반) ────────────
+function calcAhFinish(geminiYN) {
+  let score = 0;
+  if (geminiYN?.끝처리 === true)  score += 4;
+  if (geminiYN?.삼각여백 === true) score += 1;  // 삼각여백도 마무리 완성도에 기여
+  score = Math.max(0, Math.min(5, score));
+  console.log(`あ 마무리: ${score}pt`);
+  return score;
+}
+
+// ── あ YES/NO 프롬프트 (Gemini) ──────────────────────────
+function buildAhYesNoPrompt(defects) {
+  return `히라가나 'あ' 이미지를 보고 아래 두 가지 질문에만 답하세요.
+좌표 분석 결과 (참고용):
+- 루프 크기: ${defects.d1_loop}
+- 교차점: ${defects.d2_cross}
+- 루프 닫힘: ${defects.d3_closure}
+- 루프 방향: ${defects.d4_dir}
+
+질문 1 — 끝처리: 1획 끝의 갈고리(아래·왼쪽 방향 꺾임)와 3획 끝의 흘림(왼쪽 아래로 자연스럽게 빠짐)이 모두 표현되어 있나요?
+질문 2 — 삼각여백: 1획·2획·3획이 만드는 작은 삼각형 빈 공간이 글자 중앙 부근에 보이나요?
+
+아래 JSON으로만 응답 (다른 텍스트 절대 금지):
+{"끝처리":true또는false,"삼각여백":true또는false}`;
+}
+
+// ── あ 피드백 프롬프트 (Gemini) ──────────────────────────
+function buildAhFeedbackPrompt(defects, geminiYN, scores) {
+  const problems = [];
+  if (defects.d1_loop === '과대')    problems.push('루프(동그란 부분)가 글자 전체보다 너무 크게 퍼짐');
+  if (defects.d1_loop === '과소' || defects.d1_loop === '매우과소') problems.push('루프가 너무 작아 세로선 왼쪽으로 충분히 나오지 않음');
+  if (defects.d2_cross === '없음')   problems.push('가로선과 세로선이 교차하지 않음');
+  if (defects.d3_closure === '열림') problems.push('루프가 열린 C자 형태 — 닫히지 않음');
+  if (defects.d3_closure === '약간열림') problems.push('루프가 완전히 닫히지 않고 약간 열려 있음');
+  if (defects.d4_dir === 'cw')       problems.push('루프 방향이 시계방향(반시계가 정상)');
+  if (geminiYN?.끝처리 === false)    problems.push('1획 갈고리와 3획 끝 흘림이 표현되지 않음');
+  if (geminiYN?.삼각여백 === false)  problems.push('교차점 부근의 삼각형 빈 공간이 없음');
+
+  const total = scores.형태정확성 + scores.획순 + scores.비율균형 + scores.크기위치;
+  const grade = total >= 90 ? 'A' : total >= 80 ? 'B' : total >= 70 ? 'C' : total >= 60 ? 'D' : 'E';
+
+  return `당신은 일본어 교사입니다. 한국 중학생에게 히라가나 'あ' 쓰기 피드백을 한국어로 써주세요.
+
+채점 결과: ${total}점 (${grade}등급)
+발견된 문제: ${problems.length === 0 ? '없음 (잘 썼어요)' : problems.join(' / ')}
+
+규칙:
+- 일본어 용어(하네·하라이·토메) 절대 금지
+- 대신: 꾹 눌러 끝내기 / 살짝 위로 삐치듯 / 부드럽게 빼면서
+- 2~3문장으로 짧게
+- ${total >= 80 ? '칭찬 위주, 개선점은 있을 때만' : total >= 60 ? '잘된 점 1가지 + 개선점 1가지' : '핵심 문제 1가지만, 칭찬 없이'}
+- 문제가 있으면 첫 문장에서 가장 중요한 것 1가지만 지적
+- "あ" 대신 "'아'" 또는 "이 글자"로 표현
+
+아래 JSON으로만 응답:
+{"feedback":"피드백 내용"}`;
+}
+
+// ── あ 전체 채점 (새 아키텍처) ────────────────────────────
+async function scoreAh(b64, strokeMeta, apiKey) {
+  // 1단계: 좌표 분석 (결정론적)
+  const defects = analyzeAh(strokeMeta);
+
+  // 2단계: Gemini YES/NO 질문
+  let geminiYN = { 끝처리: false, 삼각여백: false };
+  try {
+    const r1 = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          contents: [{parts: [
+            {text: buildAhYesNoPrompt(defects)},
+            {inline_data: {mime_type:'image/jpeg', data:b64}}
+          ]}],
+          generationConfig: {thinkingConfig: {thinkingBudget: 0}}
+        })
+      }
+    );
+    const d1 = await r1.json();
+    const t1 = d1.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    geminiYN = JSON.parse(t1.replace(/```json|```/g,'').trim());
+    console.log(`あ Gemini YES/NO: 끝처리=${geminiYN.끝처리} 삼각여백=${geminiYN.삼각여백}`);
+  } catch(e) {
+    console.log(`あ YES/NO 파싱 실패 → 기본값 사용: ${e.message}`);
+  }
+
+  // 3단계: 점수 확정 (코드)
+  const 골격   = calcAhSkeleton(defects, geminiYN);
+  const 마무리 = calcAhFinish(geminiYN);
+  const 형태정확성 = 골격 + 마무리;
+
+  // 획순 (기존 함수 재사용)
+  const cs = calculateStrokeScore('あ', strokeMeta);
+  const 획순 = cs !== null ? cs : 18;
+
+  // 비율 균형 — あ 전용: 1획(가로)이 2획(세로)보다 길어야 정상
+  let 비율균형 = 10;
+  if (Array.isArray(strokeMeta?.strokes) && strokeMeta.strokes.length === 3) {
+    const s1len = strokeMeta.strokes[0].pathLength || 0.01;
+    const s2len = strokeMeta.strokes[1].pathLength || 0.01;
+    const ratio = s1len / s2len;
+    if      (ratio >= 0.8 && ratio <= 1.8) 비율균형 = 15;
+    else if (ratio >= 0.5 && ratio <= 2.5) 비율균형 = 10;
+    else                                   비율균형 = 5;
+    console.log(`あ 비율균형: 1획/2획=${ratio.toFixed(3)} → ${비율균형}pt`);
+  }
+
+  // 크기·위치 (기존 함수 재사용)
+  const 크기위치 = calculateGridScore(strokeMeta);
+
+  const scores = { 골격, 마무리, 형태정확성, 획순, 비율균형, 크기위치 };
+
+  // 4단계: 피드백 (Gemini)
+  let feedback = '';
+  try {
+    const r2 = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          contents: [{parts: [{text: buildAhFeedbackPrompt(defects, geminiYN, scores)}]}],
+          generationConfig: {thinkingConfig: {thinkingBudget: 0}}
+        })
+      }
+    );
+    const d2 = await r2.json();
+    const t2 = d2.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const pf = JSON.parse(t2.replace(/```json|```/g,'').trim());
+    feedback = pf.feedback || '';
+  } catch(e) {
+    console.log(`あ 피드백 생성 실패: ${e.message}`);
+    feedback = '잘 쓰셨어요! 계속 연습하면 더 좋아질 거예요.';
+  }
+
+  return { ...scores, feedback, defects, geminiYN };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ⑧ 퓨샷 — 골격(45pt) + 마무리(5pt) 기준으로 매핑
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function buildFewShotPrompt(target) {
@@ -434,6 +660,46 @@ async function handler(req, res) {
   if (b64.length < 100) return res.status(400).json({error:'이미지 데이터 부족'});
 
   try {
+    // ── あ: 새 아키텍처 (코드 채점 + Gemini YES/NO + 피드백) ──
+    if (trimmed === 'あ') {
+      const result = await scoreAh(b64, strokeMeta, apiKey);
+
+      const p = {
+        골격:        result.골격,
+        마무리:      result.마무리,
+        형태정확성:  result.형태정확성,
+        획순:        result.획순,
+        비율균형:    result.비율균형,
+        크기위치:    result.크기위치,
+        feedback:    result.feedback,
+        overlayHints: [],  // 오버레이는 추후 추가
+      };
+
+      p.score = p.형태정확성 + p.획순 + p.비율균형 + p.크기위치;
+      p.grade = p.score >= 90 ? 'A' : p.score >= 80 ? 'B' : p.score >= 70 ? 'C' : p.score >= 60 ? 'D' : 'E';
+
+      console.log(`[あ v2] 최종 ${p.score}점 (골격${p.골격} 마무리${p.마무리} 획순${p.획순} 비율균형${p.비율균형} 크기위치${p.크기위치})`);
+      console.log(`[あ v2] 결함: ${JSON.stringify(result.defects)}`);
+      console.log(`[あ v2] YesNo: ${JSON.stringify(result.geminiYN)}`);
+
+      await saveLog({
+        character:      trimmed,
+        score_total:    p.score,
+        score_skeleton: p.골격,
+        score_finish:   p.마무리,
+        score_shape:    p.형태정확성,
+        score_stroke:   p.획순,
+        score_ratio:    p.비율균형,
+        score_grid:     p.크기위치,
+        grade:          p.grade,
+        feedback:       p.feedback,
+        arch:           'v2_ah'
+      });
+
+      return res.status(200).json(p);
+    }
+
+    // ── 나머지 글자: 기존 아키텍처 (Gemini 전체 채점) ──────────
     // Gemini 2.5 Flash — 골격(45pt) + 마무리(5pt) 채점
     const resp = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
