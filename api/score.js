@@ -272,36 +272,15 @@ function buildFewShotPrompt(target) {
   const data = FEWSHOT_DB[target];
   if (!data) return '';
 
-  // fewshot_db의 구버전 점수 → 골격/마무리로 변환
-  //
-  // 골격(45): 형태정확성(38pt 기중) + 획방향(5pt 기여) + 균형비율(2pt 기여)
-  //   → 이론 최대: 38+5+2 = 45pt
-  //   [fix2] 균형비율 추가 (이전 공식에서 완전 누락되어 있었음)
-  //   [fix2] 형태정확성 가중치 40→38 (균형비율 2pt 공간 확보)
-  //
-  // 마무리(5): 끝맺음(5pt) — Math.floor로 B/C 등급 구분 보장
-  //   [fix1] Math.round → Math.floor
-  //   (이전: s80 끝맺음 8pt→4, s70 끝맺음 7pt→4로 동일 → 등급 구분 불가)
-  //   (수정: s80 끝맺음 8pt→4, s70 끝맺음 7pt→3으로 구분)
-  const map = (d) => {
-    const sc = d.scores;
-    const 골격 = Math.min(45, Math.round(
-      (sc.형태정확성 || 0) / 40 * 38 +
-      (sc.획방향     || 0) / 20 *  5 +
-      (sc.균형비율   || 0) / 10 *  2
-    ));
-    const 마무리 = Math.min(5, Math.floor(
-      (sc.끝맺음 || 0) / 10 * 5
-    ));
-    return { 골격, 마무리 };
-  };
+  // fewshot_db v2.0 — { 골격, 마무리 } 직접 참조 (리매핑 공식 불필요)
+  const fmt = (d) => `골격${d.골격}/마무리${d.마무리}`;
 
   return `
-## ${target} 채점 기준 예시 (골격 + 마무리)
-[A등급] ${data.s90.description.slice(0, 100)}... → ${JSON.stringify(map(data.s90))}
-[B등급] → ${JSON.stringify(map(data.s80))}
-[C등급] → ${JSON.stringify(map(data.s70))}
-[D등급↓] → ${JSON.stringify(map(data.s60))}
+## ${target} 채점 앵커 (골격 + 마무리)
+[A등급] ${data.s90.description} → ${fmt(data.s90)}
+[B등급] ${data.s80.description} → ${fmt(data.s80)}
+[C등급] ${data.s70.description} → ${fmt(data.s70)}
+[D등급↓] ${data.s60.description} → ${fmt(data.s60)}
 위 4단계를 기준 닻으로 삼아 상대 판단하세요.
 `;
 }
