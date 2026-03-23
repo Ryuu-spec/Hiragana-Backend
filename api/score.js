@@ -276,12 +276,13 @@ function getCharacterCriticalPoints(target) {
 function analyzeAh(strokeMeta) {
   const s = strokeMeta?.strokes;
   const result = {
-    d1_loop:    'unknown',  // 루프 크기: '과대'|'적정'|'과소'|'매우과소'
-    d2_cross:   'unknown',  // 교차점:   '정상'|'없음'
-    d3_closure: 'unknown',  // 루프 닫힘: '닫힘'|'약간열림'|'열림'
-    d4_dir:     'unknown',  // 루프 방향: 'ccw'|'cw'|'unknown'
-    charWidth:  0,
-    loopRatio:  0,
+    d1_loop:     'unknown',  // 루프 크기: '과대'|'적정'|'과소'|'매우과소'
+    d2_cross:    'unknown',  // 교차점:   '정상'|'없음'|'크게이탈'
+    d3_closure:  'unknown',  // 루프 닫힘: '닫힘'|'약간열림'|'열림'
+    d4_dir:      'unknown',  // 루프 방향: 'cw(정상)'|'ccw(반대)'|'unknown'
+    d5_protrude: 'unknown',  // 왼쪽 돌출: '정상'|'미돌출'
+    charWidth:   0,
+    loopRatio:   0,
   };
 
   if (!Array.isArray(s) || s.length !== 3) {
@@ -336,10 +337,19 @@ function analyzeAh(strokeMeta) {
   else                          result.d3_closure = '열림';
   console.log(`あ D3 루프닫힘: dist=${loopDist.toFixed(3)} ratio=${closureRatio.toFixed(3)} → ${result.d3_closure}`);
 
-  // D4: 루프 방향 (쇼엘레이스, 이미 있음)
+  // D4: 루프 방향 (쇼엘레이스)
+  // 스크린 좌표(y↓): あ 루프는 시각적 시계방향 = 수학적 CW(area>0)
+  // → CW가 올바른 방향, CCW가 반대 방향
   const dir = s3.direction || calcLoopDirection(s3.points);
   result.d4_dir = dir || 'unknown';
-  console.log(`あ D4 루프방향: ${result.d4_dir}`);
+  console.log(`あ D4 루프방향: ${result.d4_dir} (cw=정상, ccw=반대)`);
+
+  // D5: 루프 왼쪽 돌출 — 3획 minX가 2획 minX보다 충분히 왼쪽에 있는지
+  // 전체 글자 폭의 10% 이상 왼쪽으로 나와야 정상
+  const protrusion = s2.minX - s3.minX;  // 양수 = 왼쪽으로 나온 거리
+  const threshold  = result.charWidth * 0.10;
+  result.d5_protrude = protrusion >= threshold ? '정상' : '미돌출';
+  console.log(`あ D5 왼쪽돌출: 2획minX=${s2.minX.toFixed(3)} 3획minX=${s3.minX.toFixed(3)} 돌출=${protrusion.toFixed(3)} 기준=${threshold.toFixed(3)} → ${result.d5_protrude}`);
 
   return result;
 }
@@ -364,8 +374,14 @@ function calcAhSkeleton(defects, geminiYN) {
   if      (defects.d3_closure === '약간열림') { score -= 3; log.push('루프 약간열림 -3'); }
   else if (defects.d3_closure === '열림')     { score -= 8; log.push('루프 열림 -8'); }
 
-  // D4: 루프 방향
-  if (defects.d4_dir === 'cw') { score -= 4; log.push('루프방향 CW -4'); }
+  // D4: 루프 방향 — ccw가 반대 방향 (cw=시각적 시계방향=정상)
+  if (defects.d4_dir === 'ccw') { score -= 4; log.push('루프방향 반대(CCW) -4'); }
+
+  // D5: 왼쪽 돌출 미표현
+  if (defects.d5_protrude === '미돌출') { score -= 7; log.push('왼쪽 돌출 미표현 -7'); }
+
+  // D5: 루프 왼쪽 돌출
+  if (defects.d5_protrude === '미돌출') { score -= 7; log.push('왼쪽 미돌출 -7'); }
 
   // 삼각여백 (Gemini YES/NO)
   if (geminiYN?.삼각여백 === false) { score -= 3; log.push('삼각여백 없음 -3'); }
@@ -410,7 +426,8 @@ function buildAhFeedbackPrompt(defects, geminiYN, scores) {
   if (defects.d2_cross === '크게이탈') problems.push('가로선과 세로선의 교차점이 지나치게 한쪽으로 치우침');
   if (defects.d3_closure === '열림') problems.push('루프가 열린 C자 형태 — 닫히지 않음');
   if (defects.d3_closure === '약간열림') problems.push('루프가 완전히 닫히지 않고 약간 열려 있음');
-  if (defects.d4_dir === 'cw')       problems.push('루프 방향이 시계방향(반시계가 정상)');
+  if (defects.d4_dir === 'ccw')             problems.push('루프 방향이 반대 방향으로 그려짐');
+  if (defects.d5_protrude === '미돌출')     problems.push('동그란 부분이 세로선 왼쪽으로 충분히 나오지 않음 — 세로선을 넘어 왼쪽으로 크게 돌아야 함');
   if (geminiYN?.끝처리 === false)    problems.push('1획 갈고리와 3획 끝 흘림이 표현되지 않음');
   if (geminiYN?.삼각여백 === false)  problems.push('교차점 부근의 삼각형 빈 공간이 없음');
 
