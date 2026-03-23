@@ -1,12 +1,12 @@
-// score.js  v4.1 — 루브릭 v1.0 기준
+// score.js  v4.2 — 루브릭 v1.0 기준
 // ┌──────────────────────────────────────────────────────────┐
-// │  영역          배점  담당                                 │
-// │  자형          50pt  Gemini 2.5 Flash (이미지)            │
-// │    ├ 골격      45pt    전체 자형 구조·형태                │
-// │    └ 세부       5pt    끝처리 (Klee One 교과서체 기준)    │
-// │  필순          25pt  태블릿 시간·순서 데이터              │
-// │  길이·비율     15pt  태블릿 좌표 데이터                   │
-// │  그리드 배치   10pt  태블릿 바운딩박스 데이터             │
+// │  영역            배점  담당                               │
+// │  형태 정확성     50pt  Gemini 2.5 Flash (이미지)          │
+// │    ├ 골격        45pt    전체 자형 구조·형태              │
+// │    └ 마무리(끝처리) 5pt  끝처리 (Klee One 교과서체 기준) │
+// │  획순            25pt  태블릿 시간·순서 데이터            │
+// │  비율 균형       15pt  태블릿 좌표 데이터                 │
+// │  크기·위치       10pt  태블릿 바운딩박스 데이터           │
 // └──────────────────────────────────────────────────────────┘
 const { FEWSHOT_DB, getFilteredNEG } = require('../fewshot_db');
 
@@ -32,7 +32,7 @@ async function saveLog(data) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// ① 필순 (25점 만점) — 루브릭 §6
+// ① 획순 (25점 만점) — 루브릭 §6
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const STROKE_RULES = {
@@ -81,7 +81,7 @@ function calculateStrokeScore(target, strokeMeta) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// ② 길이·비율 채점 (15점 만점) — 루브릭 §7
+// ② 비율 균형 (15점 만점) — 루브릭 §7
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const RATIO_NORMS = {
@@ -96,11 +96,11 @@ function calculateProportionScore(target, strokeMeta) {
   const norm = RATIO_NORMS[target];
   const s    = strokeMeta?.strokes;
   if (!norm || !Array.isArray(s) || s.length < 2) {
-    console.log(`길이비율: ${target} 데이터 부족 → 기본값 10`);
+    console.log(`비율균형: ${target} 데이터 부족 → 기본값 10`);
     return 10;
   }
   if (s.length !== norm.length) {
-    console.log(`길이비율: 획수 불일치(${s.length}/${norm.length}) → 기본값 8`);
+    console.log(`비율균형: 획수 불일치(${s.length}/${norm.length}) → 기본값 8`);
     return 8;
   }
 
@@ -129,23 +129,23 @@ function calculateProportionScore(target, strokeMeta) {
   else if (avgDev <= 0.35) score = 10;
   else                     score = 5;
 
-  console.log(`길이비율: ${target} avgDev=${avgDev.toFixed(3)} → ${score}pt`);
+  console.log(`비율균형: ${target} avgDev=${avgDev.toFixed(3)} → ${score}pt`);
   return score;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// ③ 그리드 배치 채점 (10점 만점) — 루브릭 §8
+// ③ 크기·위치 (10점 만점) — 루브릭 §8
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function calculateGridScore(strokeMeta) {
   const arr = strokeMeta?.arrangement;
-  if (!arr) { console.log('그리드 데이터 없음 → 기본값 6'); return 6; }
+  if (!arr) { console.log('크기위치 데이터 없음 → 기본값 6'); return 6; }
 
   const size = Math.max(arr.charWidth || 0, arr.charHeight || 0);
   let sizeScore;
   if      (size >= 0.60 && size <= 0.90) sizeScore = 5;
   else if (size >= 0.50 && size <= 1.00) sizeScore = 3;
   else                                   sizeScore = 0;
-  console.log(`그리드 크기: ${size.toFixed(2)} → ${sizeScore}pt`);
+  console.log(`크기비율: ${size.toFixed(2)} → ${sizeScore}pt`);
 
   const dX = Math.abs((arr.charCenterX || 0.5) - 0.5);
   const dY = Math.abs((arr.charCenterY || 0.5) - 0.5);
@@ -154,10 +154,10 @@ function calculateGridScore(strokeMeta) {
   if      (d < 0.25) centerScore = 5;
   else if (d < 0.35) centerScore = 3;
   else               centerScore = 0;
-  console.log(`그리드 중심편차: ${d.toFixed(3)} → ${centerScore}pt`);
+  console.log(`중심편차: ${d.toFixed(3)} → ${centerScore}pt`);
 
   const total = Math.min(10, sizeScore + centerScore);
-  console.log(`그리드 배치 합계: ${total}pt`);
+  console.log(`크기위치 합계: ${total}pt`);
   return total;
 }
 
@@ -266,20 +266,20 @@ function getCharacterCriticalPoints(target) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// ⑧ 퓨샷 — 골격(45pt) + 세부(5pt) 기준으로 매핑
+// ⑧ 퓨샷 — 골격(45pt) + 마무리(5pt) 기준으로 매핑
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function buildFewShotPrompt(target) {
   const data = FEWSHOT_DB[target];
   if (!data) return '';
 
-  // fewshot_db의 구버전 점수 → 골격/세부로 변환
+  // fewshot_db의 구버전 점수 → 골격/마무리로 변환
   //
   // 골격(45): 형태정확성(38pt 기중) + 획방향(5pt 기여) + 균형비율(2pt 기여)
   //   → 이론 최대: 38+5+2 = 45pt
   //   [fix2] 균형비율 추가 (이전 공식에서 완전 누락되어 있었음)
   //   [fix2] 형태정확성 가중치 40→38 (균형비율 2pt 공간 확보)
   //
-  // 세부(5): 끝맺음(5pt) — Math.floor로 B/C 등급 구분 보장
+  // 마무리(5): 끝맺음(5pt) — Math.floor로 B/C 등급 구분 보장
   //   [fix1] Math.round → Math.floor
   //   (이전: s80 끝맺음 8pt→4, s70 끝맺음 7pt→4로 동일 → 등급 구분 불가)
   //   (수정: s80 끝맺음 8pt→4, s70 끝맺음 7pt→3으로 구분)
@@ -290,14 +290,14 @@ function buildFewShotPrompt(target) {
       (sc.획방향     || 0) / 20 *  5 +
       (sc.균형비율   || 0) / 10 *  2
     ));
-    const 세부 = Math.min(5, Math.floor(
+    const 마무리 = Math.min(5, Math.floor(
       (sc.끝맺음 || 0) / 10 * 5
     ));
-    return { 골격, 세부 };
+    return { 골격, 마무리 };
   };
 
   return `
-## ${target} 채점 기준 예시 (골격+세부)
+## ${target} 채점 기준 예시 (골격 + 마무리)
 [A등급] ${data.s90.description.slice(0, 100)}... → ${JSON.stringify(map(data.s90))}
 [B등급] → ${JSON.stringify(map(data.s80))}
 [C등급] → ${JSON.stringify(map(data.s70))}
@@ -308,12 +308,12 @@ function buildFewShotPrompt(target) {
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ⑨ 프롬프트 빌더 — Gemini용
-//    Gemini 담당: 골격(45pt) + 세부(5pt) + 피드백
+//    Gemini 담당: 골격(45pt) + 마무리(5pt) + 피드백
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function buildPrompt(target) {
   return `당신은 20년 경력의 일본어 교사입니다. 중학교 1학년 초학습자 관점에서, 전문 용어 없이 쉬운 한국어로 개선 방법을 알려주세요.
-히라가나 '${target}'를 이미지로 보고 자형 항목(골격 + 세부)만 채점하세요.
-(필순 25점은 태블릿 시간 데이터 / 길이·비율 15점·그리드 배치 10점은 좌표 데이터로 시스템이 별도 계산합니다)
+히라가나 '${target}'를 이미지로 보고 자형 항목(골격 + 마무리)만 채점하세요.
+(획순 25점은 태블릿 시간 데이터 / 비율 균형 15점·크기·위치 10점은 좌표 데이터로 시스템이 별도 계산합니다)
 
 ${buildFewShotPrompt(target)}
 
@@ -357,9 +357,9 @@ ${buildFewShotPrompt(target)}
  UD 수준 유지(다소 딱딱): +4~8
  UD 미달(뭉툭·불안정): +0~3
 
-### ■ 세부 (최대 5점) — Klee One 교과서체 끝처리 기준
+### ■ 마무리(끝처리) (최대 5점) — Klee One 교과서체 끝처리 기준
 획의 끝 처리가 Klee One 교과서체와 얼마나 일치하는가를 채점합니다.
-UD 교과서체는 끝처리를 단순화하므로 세부에는 UD 허용범위 적용 안 함 — Klee One 기준 엄격 적용.
+UD 교과서체는 끝처리를 단순화하므로 마무리에는 UD 허용범위 적용 안 함 — Klee One 기준 엄격 적용.
 
 【채점 기준】
  5점: 모든 획의 끝처리가 자연스럽고 Klee One과 일치 (꾹 눌러 끝내기 / 살짝 위로 삐치듯 / 부드럽게 빼면서)
@@ -367,8 +367,8 @@ UD 교과서체는 끝처리를 단순화하므로 세부에는 UD 허용범위 
  1점: 끝처리 시도는 있으나 방향·강도 부정확
  0점: 모든 획이 뚝 끊기거나 끝처리 전무
 
-【い 전용 세부 기준】
- 1획 곡선미(완만하게 휘어짐): Klee One 특징 — 직선이어도 골격 감점 없음, 곡선이면 세부 가산
+【い 전용 마무리 기준】
+ 1획 곡선미(완만하게 휘어짐): Klee One 특징 — 직선이어도 골격 감점 없음, 곡선이면 마무리 가산
  끝처리 방향이 표준과 같으면 세기가 약해도 3점 이상 부여
 
 ${getCharacterCriticalPoints(target)}
@@ -376,11 +376,11 @@ ${getCharacterCriticalPoints(target)}
 ## 오류 패턴
 ${getFilteredNEG(target)}
 
-★ 제한: 골격≤45, 세부≤5 절대 초과 금지
+★ 제한: 골격≤45, 마무리≤5 절대 초과 금지
 ★ 피드백: 일본어용어(하네·하라이·토메) 절대금지. 꾹눌러끝내기·살짝위로삐치듯·부드럽게빼면서 표현사용.
 
 아래 JSON으로만 응답 (다른 텍스트 절대금지):
-{"골격":숫자,"세부":숫자,"feedback":"한국어 2~3문장. 잘된점 먼저. [60미만]핵심1가지. [60~79]잘된점+개선1. [80↑]칭찬위주."}`;
+{"골격":숫자,"마무리":숫자,"feedback":"한국어 2~3문장. 잘된점 먼저. [60미만]핵심1가지. [60~79]잘된점+개선1. [80↑]칭찬위주."}`;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -454,7 +454,7 @@ async function handler(req, res) {
   if (b64.length < 100) return res.status(400).json({error:'이미지 데이터 부족'});
 
   try {
-    // Gemini 2.5 Flash — 골격(45pt) + 세부(5pt) 채점
+    // Gemini 2.5 Flash — 골격(45pt) + 마무리(5pt) 채점
     const resp = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       { method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -476,29 +476,29 @@ async function handler(req, res) {
     try {
       const p = JSON.parse(text.replace(/```json|```/g, '').trim());
 
-      // ── 골격 / 세부 클램핑 ──────────────────────────────
-      p.골격 = Math.min(45, Math.max(0, p.골격 || 0));
-      p.세부 = Math.min(5,  Math.max(0, p.세부  || 0));
-      p.자형 = p.골격 + p.세부;           // 자형 합계 (최대 50pt)
-      console.log(`[${trimmed}] Gemini 골격: ${p.골격}pt  세부: ${p.세부}pt  자형합계: ${p.자형}pt`);
+      // ── 골격 / 마무리 클램핑 ──────────────────────────────
+      p.골격    = Math.min(45, Math.max(0, p.골격    || 0));
+      p.마무리  = Math.min(5,  Math.max(0, p.마무리  || 0));
+      p.형태정확성 = p.골격 + p.마무리;    // 형태 정확성 합계 (최대 50pt)
+      console.log(`[${trimmed}] Gemini 골격: ${p.골격}pt  마무리: ${p.마무리}pt  형태정확성: ${p.형태정확성}pt`);
 
       // 오버레이 힌트용 기하학 분석
       const geo = analyzeStrokeGeometry(trimmed, strokeMeta);
 
-      // 필순 (25pt)
+      // 획순 (25pt)
       const cs = calculateStrokeScore(trimmed, strokeMeta);
-      p.필순 = cs !== null ? cs : 18;
-      console.log(`[${trimmed}] 필순: ${p.필순}pt${cs === null ? ' (기본값)' : ''}`);
+      p.획순 = cs !== null ? cs : 18;
+      console.log(`[${trimmed}] 획순: ${p.획순}pt${cs === null ? ' (기본값)' : ''}`);
 
-      // 길이·비율 (15pt)
-      p.길이비율 = calculateProportionScore(trimmed, strokeMeta);
+      // 비율 균형 (15pt)
+      p.비율균형 = calculateProportionScore(trimmed, strokeMeta);
 
-      // 그리드 배치 (10pt)
-      p.그리드배치 = calculateGridScore(strokeMeta);
+      // 크기·위치 (10pt)
+      p.크기위치 = calculateGridScore(strokeMeta);
 
       // 최종 합산
-      p.score = p.자형 + p.필순 + p.길이비율 + p.그리드배치;
-      console.log(`[${trimmed}] 최종 ${p.score}점 (골격${p.골격} 세부${p.세부} 필순${p.필순} 길이비율${p.길이비율} 그리드배치${p.그리드배치})`);
+      p.score = p.형태정확성 + p.획순 + p.비율균형 + p.크기위치;
+      console.log(`[${trimmed}] 최종 ${p.score}점 (골격${p.골격} 마무리${p.마무리} 획순${p.획순} 비율균형${p.비율균형} 크기위치${p.크기위치})`);
 
       // 성취 등급 (루브릭 §2)
       if      (p.score >= 90) p.grade = 'A';
@@ -511,18 +511,18 @@ async function handler(req, res) {
       p.overlayHints = generateOverlayHints(trimmed, strokeMeta, geo);
       console.log(`오버레이 힌트 ${p.overlayHints.length}개`);
 
-      // Supabase 로그 (골격/세부 분리 저장)
+      // Supabase 로그
       await saveLog({
-        character:     trimmed,
-        score_total:   p.score,
-        score_skeleton: p.골격,
-        score_detail:   p.세부,
-        score_shape:   p.자형,
-        score_stroke:  p.필순,
-        score_ratio:   p.길이비율,
-        score_grid:    p.그리드배치,
-        grade:         p.grade,
-        feedback:      p.feedback
+        character:        trimmed,
+        score_total:      p.score,
+        score_skeleton:   p.골격,
+        score_finish:     p.마무리,
+        score_shape:      p.형태정확성,
+        score_stroke:     p.획순,
+        score_ratio:      p.비율균형,
+        score_grid:       p.크기위치,
+        grade:            p.grade,
+        feedback:         p.feedback
       });
 
       return res.status(200).json(p);
