@@ -1,5 +1,5 @@
-// score.js  v4.4 — 루브릭 v1.0 기준
-// v4.4 변경: D8 루프원형도 + D9 획떨림 + D10 교차직교도 추가 (품질 변별력 확보)
+// score.js  v4.5 — 루브릭 v1.0 기준
+// v4.5 변경: D8 열린루프 보정 + D6/D9 실데이터 기준 재보정 + _debug 응답 포함
 const { FEWSHOT_DB, getFilteredNEG } = require('../fewshot_db');
 
 async function saveLog(data) {
@@ -297,8 +297,8 @@ function analyzeAh(strokeMeta) {
 
   // D6: 종횡비
   const ar = result.charWidth / charHeight;
-  if      (ar >= 0.65 && ar <= 1.35) result.d6_aspect = '정상';
-  else if (ar >= 0.45 && ar <= 1.60) result.d6_aspect = '약간왜곡';
+  if      (ar >= 0.55 && ar <= 1.45) result.d6_aspect = '정상';
+  else if (ar >= 0.40 && ar <= 1.70) result.d6_aspect = '약간왜곡';
   else                                result.d6_aspect = '심한왜곡';
   console.log(`あ D6 종횡비: ${ar.toFixed(3)} → ${result.d6_aspect}`);
 
@@ -390,18 +390,19 @@ function calcAhSkeleton(defects, geminiYN) {
   // 삼각여백
   if (geminiYN?.삼각여백 === false) { score -= 4; log.push('삼각여백없음 -4'); }
 
-  // D8: 루프 원형도 (v4.4 신규 — 품질 변별력 핵심)
+  // D8: 루프 원형도 (v4.5 — 열린 루프 보정: あ 루프는 끝이 빠지므로 원형도가 낮음)
+  // 실데이터: 잘 쓴 あ = 0.195, 열린 루프 특성상 0.15 이상이면 양호
   const circ = defects.d8_circularity;
-  if      (circ >= 0.55) { /* 양호 */ }
-  else if (circ >= 0.35) { score -= 4;  log.push(`원형도${circ.toFixed(2)} -4`); }
-  else if (circ >= 0.15) { score -= 8;  log.push(`원형도${circ.toFixed(2)} -8`); }
+  if      (circ >= 0.15) { /* 양호 */ }
+  else if (circ >= 0.08) { score -= 4;  log.push(`원형도${circ.toFixed(2)} -4`); }
+  else if (circ >= 0.03) { score -= 8;  log.push(`원형도${circ.toFixed(2)} -8`); }
   else                   { score -= 12; log.push(`원형도${circ.toFixed(2)} -12`); }
 
-  // D9: 획 떨림 (v4.4 신규)
+  // D9: 획 떨림 (v4.5 — 태블릿 필기 특성 반영: 손글씨는 자연 떨림 있음)
   const jit = defects.d9_jitter;
-  if      (jit <= 0.25) { /* 안정 */ }
-  else if (jit <= 0.45) { score -= 3; log.push(`떨림${jit.toFixed(2)} -3`); }
-  else if (jit <= 0.70) { score -= 6; log.push(`떨림${jit.toFixed(2)} -6`); }
+  if      (jit <= 0.40) { /* 안정 */ }
+  else if (jit <= 0.60) { score -= 3; log.push(`떨림${jit.toFixed(2)} -3`); }
+  else if (jit <= 0.85) { score -= 6; log.push(`떨림${jit.toFixed(2)} -6`); }
   else                  { score -= 9; log.push(`떨림${jit.toFixed(2)} -9`); }
 
   // D10: 교차 직교도 (v4.4 신규)
@@ -667,11 +668,13 @@ async function handler(req, res) {
       p.grade = p.score >= 90 ? 'A' : p.score >= 80 ? 'B' : p.score >= 70 ? 'C' : p.score >= 60 ? 'D' : 'E';
       const geo = analyzeStrokeGeometry(trimmed, strokeMeta);
       p.overlayHints = generateOverlayHints(trimmed, strokeMeta, geo);
-      console.log(`[あ v4.4] ${p.score}점 골격${p.골격} 마무리${p.마무리} 획순${p.획순} 비율${p.비율균형} 크기${p.크기위치}`);
-      console.log(`[あ v4.4] defects: ${JSON.stringify(result.defects)}`);
-      console.log(`[あ v4.4] YN: ${JSON.stringify(result.geminiYN)}`);
-      console.log(`[あ v4.4] skelLog: ${result.skelLog?.join(', ')}`);
-      await saveLog({ character:trimmed, score_total:p.score, score_skeleton:p.골격, score_finish:p.마무리, score_shape:p.형태정확성, score_stroke:p.획순, score_ratio:p.비율균형, score_grid:p.크기위치, grade:p.grade, feedback:p.feedback, arch:'v4.4_ah' });
+      console.log(`[あ v4.5] ${p.score}점 골격${p.골격} 마무리${p.마무리} 획순${p.획순} 비율${p.비율균형} 크기${p.크기위치}`);
+      // ★ 디버그: F12 → Network 탭에서 D8~D10 수치 확인용
+      p._debug = { defects: result.defects, geminiYN: result.geminiYN, skelLog: result.skelLog };
+      console.log(`[あ v4.5] defects: ${JSON.stringify(result.defects)}`);
+      console.log(`[あ v4.5] YN: ${JSON.stringify(result.geminiYN)}`);
+      console.log(`[あ v4.5] skelLog: ${result.skelLog?.join(', ')}`);
+      await saveLog({ character:trimmed, score_total:p.score, score_skeleton:p.골격, score_finish:p.마무리, score_shape:p.형태정확성, score_stroke:p.획순, score_ratio:p.비율균형, score_grid:p.크기위치, grade:p.grade, feedback:p.feedback, arch:'v4.5_ah' });
       return res.status(200).json(p);
     }
 
