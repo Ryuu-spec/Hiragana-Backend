@@ -333,7 +333,7 @@ function analyzeAh(strokeMeta) {
   const loopDist = Math.sqrt((s3.endX - s3.startX) ** 2 + (s3.endY - s3.startY) ** 2);
   const closureRatio = s3.pathLength > 0.01 ? loopDist / s3.pathLength : 1;
   if      (closureRatio < 0.18) result.d3_closure = '닫힘';
-  else if (closureRatio < 0.45) result.d3_closure = '약간열림';
+  else if (closureRatio < 0.35) result.d3_closure = '약간열림';
   else                          result.d3_closure = '열림';
   console.log(`あ D3 루프닫힘: dist=${loopDist.toFixed(3)} ratio=${closureRatio.toFixed(3)} → ${result.d3_closure}`);
 
@@ -400,18 +400,18 @@ function calcAhFinish(geminiYN) {
 
 // ── あ YES/NO 프롬프트 (Gemini) ──────────────────────────
 function buildAhYesNoPrompt(defects) {
-  return `히라가나 'あ' 이미지를 보고 아래 세 가지 질문에만 답하세요.
+  return `히라가나 'あ' 이미지를 보고 아래 세 가지 질문에 YES/NO로만 답하세요.
 좌표 분석 결과 (참고용):
 - 루프 크기: ${defects.d1_loop}
 - 교차점: ${defects.d2_cross}
 - 루프 닫힘: ${defects.d3_closure}
 - 루프 방향: ${defects.d4_dir}
 
-질문 1 — 루프 돌출: あ의 3번째 획(동그란 루프)이 2번째 획(세로선)의 왼쪽으로 충분히 넘어가 있나요? 루프의 가장 왼쪽 부분이 세로선보다 확실히 왼쪽에 위치해야 합니다.
-질문 2 — 끝처리: 1획 끝의 갈고리(아래·왼쪽 방향 꺾임)와 3획 끝의 흘림(왼쪽 아래로 자연스럽게 빠짐)이 모두 표현되어 있나요?
-질문 3 — 삼각여백: 1획·2획·3획이 만드는 작은 삼각형 빈 공간이 글자 중앙 부근에 보이나요?
+★ 질문 1 — 루프 돌출 [필수]: あ의 세 번째 획(동그란 루프)이 두 번째 획(세로선)보다 왼쪽으로 충분히 나와 있나요? 루프의 가장 왼쪽 끝이 세로선보다 확실히 왼쪽에 있어야 true입니다. 루프가 세로선 오른쪽에만 있거나 세로선 바로 옆에만 있으면 false입니다.
+★ 질문 2 — 끝처리 [필수]: 1획 끝의 갈고리(아래·왼쪽 방향 꺾임)와 3획 끝의 흘림(왼쪽 아래로 자연스럽게 빠짐)이 모두 표현되어 있나요?
+★ 질문 3 — 삼각여백 [필수]: 1획·2획·3획이 만드는 작은 삼각형 빈 공간이 글자 중앙 부근에 보이나요?
 
-아래 JSON으로만 응답 (다른 텍스트 절대 금지):
+반드시 아래 JSON 형식으로만 응답하세요. 세 필드 모두 포함해야 합니다 (다른 텍스트 절대 금지):
 {"루프돌출":true또는false,"끝처리":true또는false,"삼각여백":true또는false}`;
 }
 
@@ -481,8 +481,14 @@ async function scoreAh(b64, strokeMeta, apiKey) {
     );
     const d1 = await r1.json();
     const t1 = d1.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    geminiYN = JSON.parse(t1.replace(/```json|```/g,'').trim());
-    console.log(`あ Gemini YES/NO: 끝처리=${geminiYN.끝처리} 삼각여백=${geminiYN.삼각여백}`);
+    const parsed = JSON.parse(t1.replace(/```json|```/g,'').trim());
+    // 루프돌출 누락 시 기본값 false (안전한 방향 — 없으면 감점)
+    geminiYN = {
+      루프돌출: parsed.루프돌출 ?? false,
+      끝처리:   parsed.끝처리   ?? false,
+      삼각여백: parsed.삼각여백 ?? false,
+    };
+    console.log(`あ Gemini YES/NO: 루프돌출=${geminiYN.루프돌출} 끝처리=${geminiYN.끝처리} 삼각여백=${geminiYN.삼각여백}`);
   } catch(e) {
     console.log(`あ YES/NO 파싱 실패 → 기본값 사용: ${e.message}`);
   }
