@@ -377,11 +377,8 @@ function calcAhSkeleton(defects, geminiYN) {
   // D4: 루프 방향 — ccw가 반대 방향 (cw=시각적 시계방향=정상)
   if (defects.d4_dir === 'ccw') { score -= 4; log.push('루프방향 반대(CCW) -4'); }
 
-  // D5: 왼쪽 돌출 미표현
-  if (defects.d5_protrude === '미돌출') { score -= 7; log.push('왼쪽 돌출 미표현 -7'); }
-
-  // D5: 루프 왼쪽 돌출
-  if (defects.d5_protrude === '미돌출') { score -= 7; log.push('왼쪽 미돌출 -7'); }
+  // D5: 루프 돌출 — Gemini YES/NO 기반 (좌표 판단 부정확으로 이전)
+  if (geminiYN?.루프돌출 === false) { score -= 7; log.push('루프 미돌출(Gemini) -7'); }
 
   // 삼각여백 (Gemini YES/NO)
   if (geminiYN?.삼각여백 === false) { score -= 3; log.push('삼각여백 없음 -3'); }
@@ -403,18 +400,19 @@ function calcAhFinish(geminiYN) {
 
 // ── あ YES/NO 프롬프트 (Gemini) ──────────────────────────
 function buildAhYesNoPrompt(defects) {
-  return `히라가나 'あ' 이미지를 보고 아래 두 가지 질문에만 답하세요.
+  return `히라가나 'あ' 이미지를 보고 아래 세 가지 질문에만 답하세요.
 좌표 분석 결과 (참고용):
 - 루프 크기: ${defects.d1_loop}
 - 교차점: ${defects.d2_cross}
 - 루프 닫힘: ${defects.d3_closure}
 - 루프 방향: ${defects.d4_dir}
 
-질문 1 — 끝처리: 1획 끝의 갈고리(아래·왼쪽 방향 꺾임)와 3획 끝의 흘림(왼쪽 아래로 자연스럽게 빠짐)이 모두 표현되어 있나요?
-질문 2 — 삼각여백: 1획·2획·3획이 만드는 작은 삼각형 빈 공간이 글자 중앙 부근에 보이나요?
+질문 1 — 루프 돌출: あ의 3번째 획(동그란 루프)이 2번째 획(세로선)의 왼쪽으로 충분히 넘어가 있나요? 루프의 가장 왼쪽 부분이 세로선보다 확실히 왼쪽에 위치해야 합니다.
+질문 2 — 끝처리: 1획 끝의 갈고리(아래·왼쪽 방향 꺾임)와 3획 끝의 흘림(왼쪽 아래로 자연스럽게 빠짐)이 모두 표현되어 있나요?
+질문 3 — 삼각여백: 1획·2획·3획이 만드는 작은 삼각형 빈 공간이 글자 중앙 부근에 보이나요?
 
 아래 JSON으로만 응답 (다른 텍스트 절대 금지):
-{"끝처리":true또는false,"삼각여백":true또는false}`;
+{"루프돌출":true또는false,"끝처리":true또는false,"삼각여백":true또는false}`;
 }
 
 // ── あ 피드백 프롬프트 (Gemini) ──────────────────────────
@@ -427,7 +425,7 @@ function buildAhFeedbackPrompt(defects, geminiYN, scores) {
   if (defects.d3_closure === '열림') problems.push('루프가 열린 C자 형태 — 닫히지 않음');
   if (defects.d3_closure === '약간열림') problems.push('루프가 완전히 닫히지 않고 약간 열려 있음');
   if (defects.d4_dir === 'ccw')             problems.push('루프 방향이 반대 방향으로 그려짐');
-  if (defects.d5_protrude === '미돌출')     problems.push('동그란 부분이 세로선 왼쪽으로 충분히 나오지 않음 — 세로선을 넘어 왼쪽으로 크게 돌아야 함');
+  if (geminiYN?.루프돌출 === false)     problems.push('동그란 부분이 세로선 왼쪽으로 충분히 나오지 않음 — 세로선을 넘어 왼쪽으로 크게 돌아야 함');
   if (geminiYN?.끝처리 === false)    problems.push('1획 갈고리와 3획 끝 흘림이 표현되지 않음');
   if (geminiYN?.삼각여백 === false)  problems.push('교차점 부근의 삼각형 빈 공간이 없음');
 
