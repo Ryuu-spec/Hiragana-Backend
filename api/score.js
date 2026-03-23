@@ -304,10 +304,29 @@ function analyzeAh(strokeMeta) {
   else                               result.d1_loop = '매우과소';
   console.log(`あ D1 루프비율: ${result.loopRatio.toFixed(3)} → ${result.d1_loop}`);
 
-  // D2: 교차점 — 1획(가로)의 y범위 안에 2획 시작점이 있는지
-  const crossOk = s2.startY >= s1.minY && s2.startY <= s1.maxY;
-  result.d2_cross = crossOk ? '정상' : '없음';
-  console.log(`あ D2 교차점: 1획y(${s1.minY.toFixed(3)}~${s1.maxY.toFixed(3)}) 2획시작y=${s2.startY.toFixed(3)} → ${result.d2_cross}`);
+  // D2: 교차점 — 1획(가로)과 2획(세로)이 실제로 교차하는지
+  // 2획은 1획 위에서 시작해 아래로 내려오며 통과 → 시작점 체크는 틀림
+  // 올바른 체크: y범위 겹침 AND x범위 겹침 (실제 교차 여부)
+  const yOverlap = s2.minY <= s1.maxY && s2.maxY >= s1.minY;
+  const xOverlap = s2.minX <= s1.maxX && s2.maxX >= s1.minX;
+  const crossOk  = yOverlap && xOverlap;
+
+  if (!crossOk) {
+    result.d2_cross = '없음';
+  } else {
+    // 교차 위치: 2획 중심x가 1획 전체 폭에서 어느 위치인지
+    const s2centerX  = (s2.minX + s2.maxX) / 2;
+    const s1width    = (s1.maxX - s1.minX) || 0.01;
+    const crossRatio = (s2centerX - s1.minX) / s1width;
+    // 0.15 미만 또는 0.85 초과 → 지나친 이탈
+    if (crossRatio < 0.15 || crossRatio > 0.85) {
+      result.d2_cross = '크게이탈';
+    } else {
+      result.d2_cross = '정상';
+    }
+    console.log(`あ D2 교차비율: ${crossRatio.toFixed(3)} → ${result.d2_cross}`);
+  }
+  console.log(`あ D2 교차점: 1획x(${s1.minX.toFixed(3)}~${s1.maxX.toFixed(3)}) 1획y(${s1.minY.toFixed(3)}~${s1.maxY.toFixed(3)}) 2획x(${s2.minX.toFixed(3)}~${s2.maxX.toFixed(3)}) 2획y(${s2.minY.toFixed(3)}~${s2.maxY.toFixed(3)}) → ${result.d2_cross}`);
 
   // D3: 루프 닫힘 — 시작-끝 거리 / 전체 경로 길이
   const loopDist = Math.sqrt((s3.endX - s3.startX) ** 2 + (s3.endY - s3.startY) ** 2);
@@ -338,7 +357,8 @@ function calcAhSkeleton(defects, geminiYN) {
   else if (defects.d1_loop === '매우과소') { score -= 10; log.push('루프 매우과소 -10'); }
 
   // D2: 교차점
-  if (defects.d2_cross === '없음') { score -= 13; log.push('교차점 없음 -13'); }
+  if      (defects.d2_cross === '없음')     { score -= 13; log.push('교차점 없음 -13'); }
+  else if (defects.d2_cross === '크게이탈') { score -= 5;  log.push('교차점 크게이탈 -5'); }
 
   // D3: 루프 닫힘
   if      (defects.d3_closure === '약간열림') { score -= 3; log.push('루프 약간열림 -3'); }
@@ -386,7 +406,8 @@ function buildAhFeedbackPrompt(defects, geminiYN, scores) {
   const problems = [];
   if (defects.d1_loop === '과대')    problems.push('루프(동그란 부분)가 글자 전체보다 너무 크게 퍼짐');
   if (defects.d1_loop === '과소' || defects.d1_loop === '매우과소') problems.push('루프가 너무 작아 세로선 왼쪽으로 충분히 나오지 않음');
-  if (defects.d2_cross === '없음')   problems.push('가로선과 세로선이 교차하지 않음');
+  if (defects.d2_cross === '없음')     problems.push('가로선과 세로선이 교차하지 않음');
+  if (defects.d2_cross === '크게이탈') problems.push('가로선과 세로선의 교차점이 지나치게 한쪽으로 치우침');
   if (defects.d3_closure === '열림') problems.push('루프가 열린 C자 형태 — 닫히지 않음');
   if (defects.d3_closure === '약간열림') problems.push('루프가 완전히 닫히지 않고 약간 열려 있음');
   if (defects.d4_dir === 'cw')       problems.push('루프 방향이 시계방향(반시계가 정상)');
