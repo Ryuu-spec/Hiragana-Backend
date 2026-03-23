@@ -1,5 +1,5 @@
-// score.js  v4.3 — 루브릭 v1.0 기준
-// v4.3 변경: 인식가능 게이트 추가 + D1~D7 bin 세분화 + 감점 강화
+// score.js  v4.4 — 루브릭 v1.0 기준
+// v4.4 변경: D8 루프원형도 + D9 획떨림 + D10 교차직교도 추가 (품질 변별력 확보)
 const { FEWSHOT_DB, getFilteredNEG } = require('../fewshot_db');
 
 async function saveLog(data) {
@@ -103,6 +103,73 @@ function calcLoopDirection(points) {
 }
 
 // ── 앵커·기하학 (오버레이용) ──
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 품질 지표 함수 (v4.4 신규)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// D8: 루프 원형도 — 4π×|area| / perimeter²  (완벽한 원=1, 찌그러짐→0)
+function calcCircularity(points) {
+  if (!points || points.length < 4) return 0;
+  let area = 0;
+  for (let i = 0; i < points.length; i++) {
+    const j = (i + 1) % points.length;
+    area += points[i][0] * points[j][1] - points[j][0] * points[i][1];
+  }
+  area = Math.abs(area) / 2;
+  let peri = 0;
+  for (let i = 1; i < points.length; i++) {
+    const dx = points[i][0] - points[i-1][0], dy = points[i][1] - points[i-1][1];
+    peri += Math.sqrt(dx*dx + dy*dy);
+  }
+  const dx0 = points[0][0] - points[points.length-1][0];
+  const dy0 = points[0][1] - points[points.length-1][1];
+  peri += Math.sqrt(dx0*dx0 + dy0*dy0);
+  if (peri < 0.001) return 0;
+  return Math.min(1, (4 * Math.PI * area) / (peri * peri));
+}
+
+// D9: 획 떨림(jitter) — 연속 3점 방향 변화의 표준편차 (낮을수록 매끄러움)
+function calcStrokeJitter(points) {
+  if (!points || points.length < 4) return 0;
+  const angles = [];
+  for (let i = 1; i < points.length - 1; i++) {
+    const dx1 = points[i][0]-points[i-1][0], dy1 = points[i][1]-points[i-1][1];
+    const dx2 = points[i+1][0]-points[i][0], dy2 = points[i+1][1]-points[i][1];
+    const a1 = Math.atan2(dy1, dx1), a2 = Math.atan2(dy2, dx2);
+    let diff = a2 - a1;
+    while (diff > Math.PI) diff -= 2*Math.PI;
+    while (diff < -Math.PI) diff += 2*Math.PI;
+    angles.push(Math.abs(diff));
+  }
+  if (angles.length === 0) return 0;
+  const mean = angles.reduce((a,b)=>a+b,0) / angles.length;
+  const variance = angles.reduce((a,b)=>a+(b-mean)**2,0) / angles.length;
+  return Math.sqrt(variance);
+}
+
+// D9: 전체 획 평균 떨림
+function calcAvgJitter(strokes) {
+  if (!strokes || strokes.length === 0) return 0;
+  let total = 0, count = 0;
+  strokes.forEach(st => {
+    if (st.points && st.points.length >= 4) {
+      total += calcStrokeJitter(st.points);
+      count++;
+    }
+  });
+  return count > 0 ? total / count : 0;
+}
+
+// D10: 교차 직교도 — 1획과 2획의 주 방향 각도 차이 (90°가 이상적)
+function calcCrossAngle(s1, s2) {
+  const dx1 = s1.endX - s1.startX, dy1 = s1.endY - s1.startY;
+  const dx2 = s2.endX - s2.startX, dy2 = s2.endY - s2.startY;
+  const mag1 = Math.sqrt(dx1*dx1+dy1*dy1), mag2 = Math.sqrt(dx2*dx2+dy2*dy2);
+  if (mag1 < 0.001 || mag2 < 0.001) return 90;
+  const cosA = Math.max(-1, Math.min(1, (dx1*dx2+dy1*dy2)/(mag1*mag2)));
+  return Math.acos(cosA) * 180 / Math.PI;
+}
 function extractAnchors(target, strokeMeta) {
   const s = strokeMeta?.strokes;
   if (!Array.isArray(s)) return null;
@@ -160,10 +227,10 @@ function getCharacterCriticalPoints(target) {
 // ◆ あ 전용 v4.3 아키텍처
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-// ── あ 좌표 분석 (v4.3: bin 세분화 + D6 종횡비 + D7 획분류) ──
+// ── あ 좌표 분석 (v4.4: D6~D7 + D8원형도 + D9떨림 + D10직교도) ──
 function analyzeAh(strokeMeta) {
   const s = strokeMeta?.strokes;
-  const result = { d1_loop:'unknown', d2_cross:'unknown', d3_closure:'unknown', d4_dir:'unknown', d5_protrude:'unknown', d6_aspect:'unknown', d7_types:'unknown', charWidth:0, loopRatio:0, strokeCount: s?.length ?? 0 };
+  const result = { d1_loop:'unknown', d2_cross:'unknown', d3_closure:'unknown', d4_dir:'unknown', d5_protrude:'unknown', d6_aspect:'unknown', d7_types:'unknown', d8_circularity:0, d9_jitter:0, d10_crossAngle:90, charWidth:0, loopRatio:0, strokeCount: s?.length ?? 0 };
   if (!Array.isArray(s) || s.length < 1) return result;
 
   if (s.length !== 3) {
@@ -248,6 +315,21 @@ function analyzeAh(strokeMeta) {
   else result.d7_types = '불일치';
   console.log(`あ D7 획분류: [${types.join(',')}] → ${result.d7_types}`);
 
+  // ── D8: 루프 원형도 (v4.4 신규) ──
+  result.d8_circularity = calcCircularity(s3.points);
+  console.log(`あ D8 원형도: ${result.d8_circularity.toFixed(3)}`);
+
+  // ── D9: 전체 획 떨림 (v4.4 신규) ──
+  result.d9_jitter = calcAvgJitter(s);
+  console.log(`あ D9 떨림: ${result.d9_jitter.toFixed(3)}`);
+
+  // ── D10: 교차 직교도 (v4.4 신규) ──
+  result.d10_crossAngle = calcCrossAngle(
+    { startX: s1.startX, startY: s1.startY, endX: s1.endX, endY: s1.endY },
+    { startX: s2.startX, startY: s2.startY, endX: s2.endX, endY: s2.endY }
+  );
+  console.log(`あ D10 교차각도: ${result.d10_crossAngle.toFixed(1)}° (90°이상적)`);
+
   return result;
 }
 
@@ -307,6 +389,26 @@ function calcAhSkeleton(defects, geminiYN) {
   if (defects.d7_types === '부분일치') { score -= 4; log.push('획분류부분일치 -4'); }
   // 삼각여백
   if (geminiYN?.삼각여백 === false) { score -= 4; log.push('삼각여백없음 -4'); }
+
+  // D8: 루프 원형도 (v4.4 신규 — 품질 변별력 핵심)
+  const circ = defects.d8_circularity;
+  if      (circ >= 0.55) { /* 양호 */ }
+  else if (circ >= 0.35) { score -= 4;  log.push(`원형도${circ.toFixed(2)} -4`); }
+  else if (circ >= 0.15) { score -= 8;  log.push(`원형도${circ.toFixed(2)} -8`); }
+  else                   { score -= 12; log.push(`원형도${circ.toFixed(2)} -12`); }
+
+  // D9: 획 떨림 (v4.4 신규)
+  const jit = defects.d9_jitter;
+  if      (jit <= 0.25) { /* 안정 */ }
+  else if (jit <= 0.45) { score -= 3; log.push(`떨림${jit.toFixed(2)} -3`); }
+  else if (jit <= 0.70) { score -= 6; log.push(`떨림${jit.toFixed(2)} -6`); }
+  else                  { score -= 9; log.push(`떨림${jit.toFixed(2)} -9`); }
+
+  // D10: 교차 직교도 (v4.4 신규)
+  const crossDev = Math.abs(defects.d10_crossAngle - 90);
+  if      (crossDev <= 15) { /* 정상 */ }
+  else if (crossDev <= 30) { score -= 3; log.push(`교차${crossDev.toFixed(0)}°편차 -3`); }
+  else                     { score -= 6; log.push(`교차${crossDev.toFixed(0)}°편차 -6`); }
 
   score = Math.max(0, Math.min(45, score));
   console.log(`あ 골격: 43 → ${score}pt [${log.join(', ')}]`);
@@ -374,6 +476,9 @@ function buildAhFeedbackPrompt(defects, geminiYN, scores) {
   if (geminiYN?.끝처리 === false) problems.push('1획 갈고리와 3획 끝 흘림이 없음');
   if (geminiYN?.삼각여백 === false) problems.push('교차점 부근 삼각형 빈 공간이 없음');
   if (defects.d6_aspect === '심한왜곡') problems.push('가로세로 비율이 크게 어긋남');
+  if (defects.d8_circularity < 0.35) problems.push('루프(동그란 부분)가 원형이 아니라 찌그러져 있음');
+  if (defects.d9_jitter > 0.45) problems.push('획이 떨리거나 울퉁불퉁함 — 좀 더 부드럽고 자신 있게 그어주세요');
+  if (Math.abs(defects.d10_crossAngle - 90) > 30) problems.push('가로선과 세로선이 직각에 가깝게 교차해야 합니다');
 
   const total = scores.형태정확성 + scores.획순 + scores.비율균형 + scores.크기위치;
   const grade = total >= 90 ? 'A' : total >= 80 ? 'B' : total >= 70 ? 'C' : total >= 60 ? 'D' : 'E';
@@ -562,11 +667,11 @@ async function handler(req, res) {
       p.grade = p.score >= 90 ? 'A' : p.score >= 80 ? 'B' : p.score >= 70 ? 'C' : p.score >= 60 ? 'D' : 'E';
       const geo = analyzeStrokeGeometry(trimmed, strokeMeta);
       p.overlayHints = generateOverlayHints(trimmed, strokeMeta, geo);
-      console.log(`[あ v4.3] ${p.score}점 골격${p.골격} 마무리${p.마무리} 획순${p.획순} 비율${p.비율균형} 크기${p.크기위치}`);
-      console.log(`[あ v4.3] defects: ${JSON.stringify(result.defects)}`);
-      console.log(`[あ v4.3] YN: ${JSON.stringify(result.geminiYN)}`);
-      console.log(`[あ v4.3] skelLog: ${result.skelLog?.join(', ')}`);
-      await saveLog({ character:trimmed, score_total:p.score, score_skeleton:p.골격, score_finish:p.마무리, score_shape:p.형태정확성, score_stroke:p.획순, score_ratio:p.비율균형, score_grid:p.크기위치, grade:p.grade, feedback:p.feedback, arch:'v4.3_ah' });
+      console.log(`[あ v4.4] ${p.score}점 골격${p.골격} 마무리${p.마무리} 획순${p.획순} 비율${p.비율균형} 크기${p.크기위치}`);
+      console.log(`[あ v4.4] defects: ${JSON.stringify(result.defects)}`);
+      console.log(`[あ v4.4] YN: ${JSON.stringify(result.geminiYN)}`);
+      console.log(`[あ v4.4] skelLog: ${result.skelLog?.join(', ')}`);
+      await saveLog({ character:trimmed, score_total:p.score, score_skeleton:p.골격, score_finish:p.마무리, score_shape:p.형태정확성, score_stroke:p.획순, score_ratio:p.비율균형, score_grid:p.크기위치, grade:p.grade, feedback:p.feedback, arch:'v4.4_ah' });
       return res.status(200).json(p);
     }
 
