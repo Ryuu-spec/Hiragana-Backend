@@ -332,7 +332,7 @@ function analyzeAh(strokeMeta) {
   // D3: 루프 닫힘 — 시작-끝 거리 / 전체 경로 길이
   const loopDist = Math.sqrt((s3.endX - s3.startX) ** 2 + (s3.endY - s3.startY) ** 2);
   const closureRatio = s3.pathLength > 0.01 ? loopDist / s3.pathLength : 1;
-  if      (closureRatio < 0.25) result.d3_closure = '닫힘';
+  if      (closureRatio < 0.18) result.d3_closure = '닫힘';
   else if (closureRatio < 0.45) result.d3_closure = '약간열림';
   else                          result.d3_closure = '열림';
   console.log(`あ D3 루프닫힘: dist=${loopDist.toFixed(3)} ratio=${closureRatio.toFixed(3)} → ${result.d3_closure}`);
