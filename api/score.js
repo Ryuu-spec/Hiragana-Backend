@@ -1,15 +1,14 @@
-// score.js — v4
+// score.js — 최종 안정화 버전
+// 예전 1번 호출 구조 유지
 // 변경사항:
-//   ✅ 루브릭 구조 예전과 동일 유지 (형태40 + 필순20 + 획방향20 + 끝맺음10 + 균형비율10)
 //   ✅ NEG_PATTERNS 직렬화 버그 수정 (${NEG_PATTERNS} → negList.map(...))
-//   ✅ fewshot 앵커 제거 (환각 원인)
-//   ✅ 글자별 핵심 체크포인트 3가지로 교체
-//   ✅ 피드백 톤: 잘된 점 1문장 + 개선점 1문장 고정
+//   ✅ 체크포인트 3가지 프롬프트에 추가
+//   ✅ 55점 하한선 유지
 // ============================================================
 
 const { NEG_PATTERNS } = require('../fewshot_db');
 
-// 글자별 핵심 체크포인트 (Gemini가 집중할 3가지)
+// 글자별 핵심 체크포인트
 const CHECKPOINTS = {
   'あ': [
     '1획이 짧고 위로 기울어져 있는가',
@@ -80,7 +79,7 @@ const CHECKPOINTS = {
 };
 
 // ============================================================
-// 프롬프트 빌더
+// 채점 프롬프트 빌더
 // ============================================================
 function buildPrompt(target) {
   const checkpoints = CHECKPOINTS[target] || [
@@ -89,36 +88,37 @@ function buildPrompt(target) {
     '획의 끝처리가 자연스러운가',
   ];
 
-  // ✅ NEG 버그 수정: 객체를 문자열로 직렬화
+  // NEG 패턴 직렬화 (버그 수정)
   const negList = NEG_PATTERNS[target];
   const negSection = negList && negList.length > 0
     ? `\n## 반드시 확인할 오류 패턴 (해당 시 즉시 감점)\n${negList.map(p => `- [${p.id}] ${p.desc}`).join('\n')}`
     : '';
 
-  return `당신은 한국 중고등학생의 히라가나 손글씨를 채점하는 일본어 전문 교사입니다.
-학습자가 쓴 히라가나 '${target}'를 이미지로 보고 5가지 항목을 채점하세요.
+  return `당신은 20년 경력의 일본어 교사입니다. 중학교 1학년 초학습자를 가르친다는 관점에서 채점하세요.
+학습자가 쓴 히라가나 '${target}'를 이미지로 보고 5가지 항목을 각각 채점하세요.
 
-## 핵심 체크포인트 (이 3가지를 중심으로 형태정확성 채점)
+## '${target}' 핵심 체크포인트 (형태정확성 채점 기준)
 ${checkpoints.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 ${negSection}
 
-## 채점 항목 (총 100점, 각 항목 최대값 절대 초과 금지)
-- 형태정확성 (0~40점): 글자 전체 형태가 '${target}'와 얼마나 닮았는가. 체크포인트 3가지 충족도 기준.
-- 필순 (0~20점): 획의 순서와 개수가 맞는가.
-- 획방향 (0~20점): 각 획의 방향과 흐름이 올바른가.
-- 끝맺음 (0~10점): 획의 시작과 끝 처리가 자연스러운가.
-- 균형비율 (0~10점): 글자의 크기, 위치, 균형이 잘 맞는가.
+## 채점 가이드라인
+- 글자가 '${target}'로 인식 가능하면 → 형태정확성 최소 23점 이상
+- 주요 획이 2개 이상 존재하고 글자가 식별 가능하면 → 총점 최소 55점 이상
+- 기본 형태가 대체로 맞고 주요 획이 표현되었다면 → 총점 70점 이상
+- 형태가 잘 잡혀 있고 흐름이 자연스럽다면 → 총점 85점 이상
+- 획순 오류가 있어도 형태가 맞으면 필순 최대 5점만 감점
+- 일본어 필법 전문 용어 절대 금지 (하네·하라이·토메 등)
 
-## 채점 원칙
-- 글자가 '${target}'로 식별 가능하면 형태정확성 최소 23점 이상
-- 글자가 식별 가능하면 총점 55점 미만 부여 금지
-- 일본어 필법 전문 용어 절대 사용 금지 (하네·하라이·토메 등)
+## 원형·루프 획 평가 기준
+- 원이나 루프가 시각적으로 둥글고 닫혀 보이면 완성된 것으로 평가
+- 'あ'의 3획은 붓글씨 특성상 완전히 닫히지 않아도 자연스러움
 
-## 피드백 규칙 (반드시 준수)
-- 총점 80 이상: 잘된 점 1문장 + 개선점 1문장
-- 총점 60~79: 잘된 점 1문장 + 개선점 1문장
-- 총점 60 미만: 개선점 1문장만 (칭찬 없이)
-- 동작으로 직접 묘사 (예: "획 끝을 살짝 위로 올려주세요")
+## 채점 기준 (각 항목 최대값 절대 초과 금지)
+- 형태정확성 (0~40): 획의 전체적인 형태가 '${target}'와 얼마나 닮았는가
+- 필순 (0~20): 획의 순서와 개수가 맞는가
+- 획방향 (0~20): 각 획의 방향과 흐름이 올바른가
+- 끝맺음 (0~10): 획의 시작과 끝 처리가 자연스러운가
+- 균형비율 (0~10): 글자의 크기, 위치, 균형이 잘 맞는가
 
 반드시 아래 JSON 형식으로만 응답하세요:
 {
@@ -127,7 +127,7 @@ ${negSection}
   "획방향": 숫자,
   "끝맺음": 숫자,
   "균형비율": 숫자,
-  "feedback": "한국어 피드백"
+  "feedback": "한국어 2문장. 잘된 점 1문장 + 개선점 1문장. 총점 60 미만이면 개선점만. 동작을 직접 묘사하는 표현 사용."
 }`;
 }
 
@@ -144,10 +144,10 @@ async function handler(req, res) {
   const { target, imageData } = req.body;
   const apiKey = process.env.GEMINI_API_KEY;
   const base64Data = imageData.includes(',') ? imageData.split(',')[1] : imageData;
+  const prompt = buildPrompt(target);
 
-  // Gemini 공통 호출 함수 (503 시 1회 재시도)
-  const geminiCall = async (prompt, retry = true) => {
-    const res = await fetch(
+  try {
+    const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
@@ -162,46 +162,25 @@ async function handler(req, res) {
         })
       }
     );
-    const data = await res.json();
-    // 503 과부하 시 2초 후 1회 재시도
-    if (data.error?.code === 503 && retry) {
-      await new Promise(r => setTimeout(r, 2000));
-      return geminiCall(prompt, false);
-    }
-    if (data.error) throw new Error(JSON.stringify(data.error));
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  };
 
-  try {
-    // ── 1단계: 글자 식별 확인 ─────────────────────────────
-    const checkpoints = CHECKPOINTS[target] || [];
-    const step1Prompt = `이미지에 쓰인 히라가나가 '${target}'인지 판별하세요.
+    const data = await response.json();
 
-'${target}'의 핵심 구조 체크포인트:
-${checkpoints.map((c, i) => `${i + 1}. ${c}`).join('\n')}
-
-위 체크포인트 중 2개 이상 충족하면 YES, 아니면 NO.
-반드시 YES 또는 NO 한 단어로만 답하세요.`;
-
-    const step1Result = (await geminiCall(step1Prompt)).trim().toUpperCase();
-    const isTarget = step1Result.includes('YES');
-
-    if (!isTarget) {
-      return res.status(200).json({
-        형태정확성: 10,
-        필순: 5,
-        획방향: 5,
-        끝맺음: 2,
-        균형비율: 2,
-        score: 24,
-        feedback: `'${target}'의 기본 구조가 표현되지 않았어요. 획의 개수와 방향을 다시 확인하고 써보세요.`,
-      });
+    if (data.error) {
+      console.log("Gemini error:", JSON.stringify(data.error));
+      return res.status(500).json({ error: "Gemini API 오류", detail: data.error });
     }
 
-    // ── 2단계: 상세 채점 ──────────────────────────────────
-    const prompt = buildPrompt(target);
-    const resultText = await geminiCall(prompt);
-    const cleaned = resultText.replace(/```json|```/g, '').trim();
+    if (!data.candidates?.[0]) {
+      console.log("candidates 없음:", JSON.stringify(data).slice(0, 500));
+      return res.status(500).json({ error: "candidates 없음", detail: data });
+    }
+
+    const parts = data.candidates[0]?.content?.parts;
+    if (!parts?.[0]?.text) {
+      return res.status(500).json({ error: "응답 없음", detail: data });
+    }
+
+    const cleaned = parts[0].text.replace(/```json|```/g, '').trim();
 
     try {
       const parsed = JSON.parse(cleaned);
@@ -212,6 +191,7 @@ ${checkpoints.map((c, i) => `${i + 1}. ${c}`).join('\n')}
       parsed.획방향     = Math.min(20, Math.max(0, parsed.획방향     || 0));
       parsed.끝맺음     = Math.min(10, Math.max(0, parsed.끝맺음     || 0));
       parsed.균형비율   = Math.min(10, Math.max(0, parsed.균형비율   || 0));
+
       parsed.score = parsed.형태정확성 + parsed.필순 + parsed.획방향 + parsed.끝맺음 + parsed.균형비율;
 
       // 55점 하한선
@@ -228,7 +208,7 @@ ${checkpoints.map((c, i) => `${i + 1}. ${c}`).join('\n')}
       return res.status(200).json(parsed);
 
     } catch (e) {
-      console.log("JSON 파싱 실패. raw:", cleaned.slice(0, 300));
+      console.log("JSON 파싱 실패:", cleaned.slice(0, 300));
       return res.status(500).json({ error: "JSON 파싱 실패", raw: cleaned });
     }
 
