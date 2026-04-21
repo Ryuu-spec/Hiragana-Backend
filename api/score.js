@@ -144,10 +144,10 @@ async function handler(req, res) {
   const { target, imageData } = req.body;
   const apiKey = process.env.GEMINI_API_KEY;
   const base64Data = imageData.includes(',') ? imageData.split(',')[1] : imageData;
-  const prompt = buildPrompt(target);
 
-  try {
-    const response = await fetch(
+  // Gemini 공통 호출 함수
+  const geminiCall = async (prompt) => {
+    const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
@@ -162,20 +162,47 @@ async function handler(req, res) {
         })
       }
     );
+    const data = await res.json();
+    if (data.error) throw new Error(JSON.stringify(data.error));
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  };
 
-    const data = await response.json();
+  try {
+    // ── 1단계: 글자 식별 확인 ─────────────────────────────
+    const checkpoints = CHECKPOINTS[target] || [];
+    const step1Prompt = `이미지에 쓰인 히라가나가 '${target}'인지 판별하세요.
+
+'${target}'의 핵심 구조 체크포인트:
+${checkpoints.map((c, i) => `${i + 1}. ${c}`).join('\n')}
+
+위 체크포인트 중 2개 이상 충족하면 YES, 아니면 NO.
+반드시 YES 또는 NO 한 단어로만 답하세요.`;
+
+    const step1Result = (await geminiCall(step1Prompt)).trim().toUpperCase();
+    const isTarget = step1Result.includes('YES');
+
+    if (!isTarget) {
+      return res.status(200).json({
+        형태정확성: 10,
+        필순: 5,
+        획방향: 5,
+        끝맺음: 2,
+        균형비율: 2,
+        score: 24,
+        feedback: `'${target}'의 기본 구조가 표현되지 않았어요. 획의 개수와 방향을 다시 확인하고 써보세요.`,
+      });
+    }
+
+    // ── 2단계: 상세 채점 ──────────────────────────────────
+    const prompt = buildPrompt(target);
+    const resultText = await geminiCall(prompt);
 
     if (data.error) {
       console.log("Gemini error:", JSON.stringify(data.error));
       return res.status(500).json({ error: "Gemini API 오류", detail: data.error });
     }
 
-    const parts = data.candidates?.[0]?.content?.parts;
-    if (!parts?.[0]?.text) {
-      return res.status(500).json({ error: "응답 없음", detail: data });
-    }
-
-    const cleaned = parts[0].text.replace(/```json|```/g, '').trim();
+    const cleaned = resultText.replace(/```json|```/g, '').trim();
 
     try {
       const parsed = JSON.parse(cleaned);
