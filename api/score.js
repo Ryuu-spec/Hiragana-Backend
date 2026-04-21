@@ -145,8 +145,8 @@ async function handler(req, res) {
   const apiKey = process.env.GEMINI_API_KEY;
   const base64Data = imageData.includes(',') ? imageData.split(',')[1] : imageData;
 
-  // Gemini 공통 호출 함수
-  const geminiCall = async (prompt) => {
+  // Gemini 공통 호출 함수 (503 시 1회 재시도)
+  const geminiCall = async (prompt, retry = true) => {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
@@ -163,6 +163,11 @@ async function handler(req, res) {
       }
     );
     const data = await res.json();
+    // 503 과부하 시 2초 후 1회 재시도
+    if (data.error?.code === 503 && retry) {
+      await new Promise(r => setTimeout(r, 2000));
+      return geminiCall(prompt, false);
+    }
     if (data.error) throw new Error(JSON.stringify(data.error));
     return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
   };
@@ -196,12 +201,6 @@ ${checkpoints.map((c, i) => `${i + 1}. ${c}`).join('\n')}
     // ── 2단계: 상세 채점 ──────────────────────────────────
     const prompt = buildPrompt(target);
     const resultText = await geminiCall(prompt);
-
-    if (data.error) {
-      console.log("Gemini error:", JSON.stringify(data.error));
-      return res.status(500).json({ error: "Gemini API 오류", detail: data.error });
-    }
-
     const cleaned = resultText.replace(/```json|```/g, '').trim();
 
     try {
