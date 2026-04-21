@@ -158,7 +158,7 @@ async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { target, imageData } = req.body;
+  const { target, imageData, strokeMeta } = req.body;
   const apiKey = process.env.GEMINI_API_KEY;
   const base64Data = imageData.includes(',') ? imageData.split(',')[1] : imageData;
   const prompt = buildPrompt(target);
@@ -210,6 +210,19 @@ async function handler(req, res) {
       parsed.균형비율   = Math.min(10, Math.max(0, parsed.균형비율   || 0));
 
       parsed.score = parsed.형태정확성 + parsed.필순 + parsed.획방향 + parsed.끝맺음 + parsed.균형비율;
+
+      // あ 좌표 오류 시 점수 강제 제한
+      if (target === 'あ' && strokeMeta) {
+        if (strokeMeta.あ_교차_오류 || strokeMeta.あ_원_오류) {
+          parsed.형태정확성 = Math.min(15, parsed.형태정확성);
+          parsed.score = Math.min(55, parsed.형태정확성 + parsed.필순 + parsed.획방향 + parsed.끝맺음 + parsed.균형비율);
+          if (!parsed.feedback.includes('세로선')) {
+            parsed.feedback = strokeMeta.あ_원_오류
+              ? '동그란 부분이 세로선 오른쪽으로 충분히 나와야 해요. 왼쪽에만 머물고 있어요.'
+              : '첫 번째와 두 번째 획의 교차점이 너무 끝쪽에 있어요. 중앙 부근에서 만나야 해요.';
+          }
+        }
+      }
 
       // 55점 하한선
       if (parsed.score > 0 && parsed.score < 55) {
