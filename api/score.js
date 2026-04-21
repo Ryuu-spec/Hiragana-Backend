@@ -211,17 +211,9 @@ async function handler(req, res) {
 
       parsed.score = parsed.형태정확성 + parsed.필순 + parsed.획방향 + parsed.끝맺음 + parsed.균형비율;
 
-      // あ 좌표 오류 시 점수 강제 제한
-      if (target === 'あ' && strokeMeta) {
-        if (strokeMeta.あ_교차_오류 || strokeMeta.あ_원_오류) {
-          parsed.형태정확성 = Math.min(15, parsed.형태정확성);
-          parsed.score = Math.min(55, parsed.형태정확성 + parsed.필순 + parsed.획방향 + parsed.끝맺음 + parsed.균형비율);
-          if (!parsed.feedback.includes('세로선')) {
-            parsed.feedback = strokeMeta.あ_원_오류
-              ? '동그란 부분이 세로선 오른쪽으로 충분히 나와야 해요. 왼쪽에만 머물고 있어요.'
-              : '첫 번째와 두 번째 획의 교차점이 너무 끝쪽에 있어요. 중앙 부근에서 만나야 해요.';
-          }
-        }
+      // あ 좌표 체크 결과로 형태정확성 상한 적용
+      if (target === 'あ' && strokeMeta?.あ_형태_상한 !== undefined) {
+        parsed.형태정확성 = Math.min(strokeMeta.あ_형태_상한, parsed.형태정확성);
       }
 
       // 55점 하한선
